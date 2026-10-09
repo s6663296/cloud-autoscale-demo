@@ -21,6 +21,16 @@ from web.metrics import Metrics
 from shared.citymap import get_city
 
 STATIC_DIR = Path(__file__).parent / "static"
+# 前端檔案每次都向伺服器確認（ETag 沒變就回 304）。沒有這個標頭時瀏覽器會自行快取，
+# 改版後可能拿到新的 HTML 配舊的 CSS／JS，畫面錯亂。
+NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+class FrontendFiles(StaticFiles):
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers.update(NO_CACHE)
+        return response
 
 Target = Literal["fixed", "auto"]
 Outcome = Literal["ok", "timeout", "busy", "error"]
@@ -160,9 +170,9 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     async def index() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html")
+        return FileResponse(STATIC_DIR / "index.html", headers=NO_CACHE)
 
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    app.mount("/static", FrontendFiles(directory=STATIC_DIR), name="static")
     return app
 
 

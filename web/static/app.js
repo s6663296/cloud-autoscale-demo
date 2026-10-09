@@ -51,6 +51,25 @@ function html(tag, text, cls) {
   return node;
 }
 
+/** 引用 index.html 內嵌的圖示；純裝飾，旁邊的文字或 aria-label 才是可讀名稱。 */
+function icon(name) {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("class", "icon");
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS(NS, "use");
+  use.setAttribute("href", `#i-${name}`);
+  svg.append(use);
+  return svg;
+}
+
+/** 文字前加圖示，讓狀態不只靠顏色辨識。 */
+function iconText(name, text) {
+  const frag = document.createDocumentFragment();
+  frag.append(icon(name), html("span", text));
+  return frag;
+}
+
 async function getJSON(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url} HTTP ${res.status}`);
@@ -60,12 +79,17 @@ async function getJSON(url) {
 // --- 畫面切換（支援手機返回鍵）-------------------------------------------
 
 function show(name, { push = true } = {}) {
-  // 離開追蹤頁（再點一單或按返回）就放棄原本的訂單，不再追蹤，避免現場連續下單讓追蹤請求越積越多
-  if (state.screen === "tracking" && name !== "tracking") stopTracks();
+  // 按返回離開追蹤頁時訂單繼續追蹤，由懸浮球帶回；按「再點一單」或下新訂單才停止
   state.screen = name;
   document.body.dataset.screen = name;
   for (const screen of document.querySelectorAll(".screen")) screen.hidden = screen.id !== `screen-${name}`;
   $("#back").hidden = name === "home" || (name === "tracking" && state.busy);
+  // 購物車列在首頁與店家頁共用：移到目前畫面的底部
+  if (name === "home" || name === "restaurant") {
+    $(`#screen-${name}`).appendChild($("#cart-bar"));
+    updateCartBar();
+  }
+  updateOrderFab();
   window.scrollTo(0, 0);
   if (push) history.pushState({ screen: name }, "");
 }
@@ -77,7 +101,7 @@ window.addEventListener("popstate", (e) => {
     return;
   }
   const target = e.state?.screen || "home";
-  if ((target === "restaurant" || target === "checkout" || target === "tracking") && !state.restaurant) {
+  if (target === "tracking" ? !hasOrder() : (target === "restaurant" || target === "checkout") && !state.restaurant) {
     show("home", { push: false });
     return;
   }
@@ -89,12 +113,15 @@ window.addEventListener("popstate", (e) => {
 // --- 首頁 ------------------------------------------------------------------
 
 function renderRestaurants() {
+  $("#restaurants").removeAttribute("aria-busy");
   $("#restaurants").replaceChildren(...state.map.restaurants.map((r) => {
     const l = look(r);
     const preps = r.menu.map((m) => m.prep_min);
     const card = html("button", undefined, "restaurant-card");
     card.type = "button";
-    const thumb = html("div", l.emoji, "thumb");
+    const thumb = html("div", undefined, "thumb");
+    thumb.append(html("span", l.emoji));
+    thumb.setAttribute("aria-hidden", "true");
     thumb.style.background = `linear-gradient(135deg, ${l.tint[0]}, ${l.tint[1]})`;
     const body = html("div", undefined, "body");
     body.append(
@@ -126,7 +153,7 @@ function renderMenu() {
   const r = state.restaurant;
   const l = look(r);
   const cover = $("#r-cover");
-  cover.textContent = l.emoji;
+  cover.replaceChildren(html("span", l.emoji));
   cover.style.background = `linear-gradient(135deg, ${l.tint[0]}, ${l.tint[1]})`;
   $("#r-name").textContent = r.name;
   $("#r-meta").textContent = `${l.category} · 免外送費`;
@@ -151,7 +178,8 @@ function menuRow(item) {
   const render = () => {
     const n = state.qty[item.id] || 0;
     if (n === 0) {
-      const add = html("button", "+", "add-btn");
+      const add = html("button", undefined, "add-btn");
+      add.append(icon("plus"));
       add.type = "button";
       add.setAttribute("aria-label", `加入 ${item.name}`);
       add.addEventListener("click", () => set(1));
@@ -159,8 +187,10 @@ function menuRow(item) {
       return;
     }
     const stepper = html("div", undefined, "stepper");
-    const minus = html("button", "−", "minus");
-    const plus = html("button", "+");
+    const minus = html("button", undefined, "minus");
+    const plus = html("button");
+    minus.append(icon("minus"));
+    plus.append(icon("plus"));
     minus.type = plus.type = "button";
     minus.setAttribute("aria-label", `減少 ${item.name}`);
     plus.setAttribute("aria-label", `增加 ${item.name}`);
@@ -176,10 +206,12 @@ function menuRow(item) {
 }
 
 function updateCartBar() {
-  const { count, total } = cartSummary(state.restaurant.menu, state.qty);
+  const r = state.restaurant;
+  const { count, total } = r ? cartSummary(r.menu, state.qty) : { count: 0, total: 0 };
   $("#cart-bar").hidden = count === 0;
   $("#cart-count").textContent = String(count);
   $("#cart-total").textContent = `NT$ ${total}`;
+  $("#view-cart").setAttribute("aria-label", `查看購物車，共 ${count} 件，NT$ ${total}`);
 }
 
 // --- 結帳 ------------------------------------------------------------------
@@ -243,6 +275,33 @@ function stopTracks() {
     t.cancel.abort(); // 中斷還在等回應的追蹤請求
     t.view.destroy();
   }
+  state.tracks = {};
+}
+
+function hasOrder() {
+  return Object.keys(state.tracks).length > 0;
+}
+
+const deliveringNow = () => Object.values(state.tracks).some((t) => t.phase === "delivering");
+
+/** 懸浮球：不在追蹤頁且有訂單時顯示整體狀態，點一下回到追蹤頁。 */
+function updateOrderFab() {
+  const fab = $("#order-fab");
+  fab.hidden = state.screen === "tracking" || !hasOrder();
+  if (fab.hidden) return;
+  const phases = Object.values(state.tracks).map((t) => t.phase);
+  const [label, status] = state.busy ? ["派單中", "active"]
+    : phases.includes("delivering") ? ["配送中", "active"]
+      : phases.includes("delivered") ? ["已送達", "done"]
+        : ["派單失敗", "failed"];
+  fab.dataset.status = status;
+  fab.querySelector(".fab-label").textContent = label;
+  fab.setAttribute("aria-label", `查看訂單進度：${label}`);
+}
+
+function setPhase(track, phase) {
+  track.phase = phase;
+  updateOrderFab();
 }
 
 function createTracks() {
@@ -292,8 +351,10 @@ function setWaiting(track) {
   setSegments(track, 0, 0);
   track.waitText = html("span", "已等待 0.0 秒");
   track.status.replaceChildren(html("span", undefined, "spinner"), track.waitText);
+  track.stepText = null;
   track.trackMeta.textContent = "";
   track.rider.hidden = true;
+  setPhase(track, "waiting");
 }
 
 function setSuccess(track, r) {
@@ -306,13 +367,19 @@ function setSuccess(track, r) {
   track.rider.querySelector(".rider-name").textContent = d.rider.name;
   track.view.showResult(d);
   showProgress(track, "to_restaurant", 0, d.schedule.deliver_s);
+  setPhase(track, "delivering");
 }
 
 function showProgress(track, phase, simS, etaS) {
   const p = progressFromTrack(phase, simS, etaS, track.result.schedule);
   setSegments(track, p.step, p.frac);
   track.eta.textContent = etaText(simS + etaS, simS);
-  track.status.textContent = STEP_TEXT[p.step];
+  // 只在階段改變時更新，避免螢幕閱讀器每 2 秒重唸一次
+  if (track.stepText !== STEP_TEXT[p.step]) {
+    track.stepText = STEP_TEXT[p.step];
+    track.status.classList.toggle("done", phase === "delivered");
+    track.status.replaceChildren(phase === "delivered" ? iconText("check-circle", track.stepText) : track.stepText);
+  }
 }
 
 /** 把單次追蹤的結果回報 web，讓儀表板在配送期間也看得到這台執行個體；不等待回應。 */
@@ -340,7 +407,7 @@ async function trackLoop(track, base, orderId) {
     if (r.outcome !== "ok") {
       failures += 1;
       const reason = { timeout: "逾時", busy: "服務忙碌", error: r.detail.split("（")[0] }[r.outcome];
-      track.trackMeta.textContent = `⚠ 位置更新延遲（${reason}），已重試 ${failures} 次`;
+      track.trackMeta.replaceChildren(iconText("alert", `位置更新延遲（${reason}），已重試 ${failures} 次`));
       track.trackMeta.className = "track-meta stale";
       continue;
     }
@@ -350,7 +417,10 @@ async function trackLoop(track, base, orderId) {
     track.view.applyTrack(d, interval);
     showProgress(track, d.phase, d.sim_s, d.eta_s);
     track.trackMeta.textContent = "";
-    if (d.phase === "delivered") return;
+    if (d.phase === "delivered") {
+      setPhase(track, "delivered");
+      return;
+    }
   }
 }
 
@@ -361,11 +431,13 @@ function setFailed(track, r) {
   track.eta.className = "eta small fail";
   track.progress.className = "progress";
   setSegments(track, 0, 0);
-  track.status.textContent = {
-    timeout: `✗ 逾時：超過 ${state.config.timeout_ms / 1000} 秒沒有回應`,
-    busy: `✗ 服務忙碌（${r.detail}）`,
-    error: `✗ 錯誤：${r.detail}`,
-  }[r.outcome];
+  track.status.classList.add("fail");
+  track.status.replaceChildren(iconText("x-circle", {
+    timeout: `逾時：超過 ${state.config.timeout_ms / 1000} 秒沒有回應`,
+    busy: `服務忙碌（${r.detail}）`,
+    error: `錯誤：${r.detail}`,
+  }[r.outcome]));
+  setPhase(track, "failed");
 }
 
 function renderOrderDetail(body) {
@@ -380,6 +452,7 @@ async function placeOrder() {
   if (state.busy) return;
   const r = state.restaurant;
   if (!r || cartSummary(r.menu, state.qty).count === 0) return;
+  if (deliveringNow() && !confirm("上一筆訂單還在配送中，要停止追蹤並送出新訂單嗎？")) return;
   state.busy = true;
 
   const orderId = makeOrderId();
@@ -389,6 +462,7 @@ async function placeOrder() {
   renderOrderDetail(body);
   const again = $("#again");
   again.disabled = true;
+  again.setAttribute("aria-busy", "true");
   again.textContent = "派單中…";
   show("tracking");
   createTracks();
@@ -427,11 +501,15 @@ async function placeOrder() {
 
   state.busy = false;
   again.disabled = false;
+  again.removeAttribute("aria-busy");
   again.textContent = "再點一單";
-  $("#back").hidden = false;
+  $("#back").hidden = state.screen === "home";
+  updateOrderFab();
 }
 
 function orderAgain() {
+  if (deliveringNow() && !confirm("這筆訂單還沒送達，確定要取消並重新點餐嗎？")) return;
+  stopTracks();
   state.qty = {};
   state.restaurant = null;
   $("#customer-form").reset();
@@ -451,12 +529,15 @@ async function init() {
   });
   $("#place-order").addEventListener("click", placeOrder);
   $("#again").addEventListener("click", orderAgain);
+  $("#order-fab").addEventListener("click", () => show("tracking"));
   try {
     [state.config, state.map] = await Promise.all([getJSON("/api/config"), getJSON("/api/map")]);
   } catch (err) {
     const msg = $("#load-error");
     msg.textContent = `載入失敗：${err.message}。請重新整理頁面。`;
     msg.hidden = false;
+    $("#restaurants").replaceChildren();
+    $("#restaurants").removeAttribute("aria-busy");
     return;
   }
   renderRestaurants();
