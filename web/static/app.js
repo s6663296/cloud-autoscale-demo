@@ -237,7 +237,7 @@ async function postJSON(base, path, body, timeoutMs) {
 function stopTracks() {
   for (const t of Object.values(state.tracks)) {
     t.stopped = true;
-    t.view.stop();
+    t.view.destroy();
   }
 }
 

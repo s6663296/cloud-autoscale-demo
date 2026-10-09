@@ -48,6 +48,9 @@ export class CityMapView {
     this.labels = el("g", {}, svg);
     this.overlay = el("g", {}, svg);
     this.setView([[size / 2, size / 2]], size);
+    // 視窗縮放或跨過 CSS 斷點時地圖寬高比會變，重算視野，否則 viewBox 比例不符會在上下或左右留白
+    this.resizer = new ResizeObserver(() => this.fit && this.setView(...this.fit));
+    this.resizer.observe(svg);
   }
 
   // --- 狀態 ---------------------------------------------------------------
@@ -93,14 +96,22 @@ export class CityMapView {
     cancelAnimationFrame(this.frame);
   }
 
+  /** 不再使用這張地圖時呼叫。 */
+  destroy() {
+    this.stop();
+    this.resizer.disconnect();
+  }
+
   // --- 繪製 ---------------------------------------------------------------
 
   setView(points, minSpan) {
+    this.fit = [points, minSpan];
     const [x, y, span] = fitView(points, this.map.size, { minSpan, pad: 2 });
     // 圖釘往上突出約 40px，上方多留一些空間避免被切掉
     const h = span * 1.2;
     // 寬高比跟著 app.css 的 .map aspect-ratio（手機正方形、寬螢幕 4:3）
-    const w = h * ((this.svg.clientWidth / this.svg.clientHeight) || 1);
+    const ratio = this.svg.clientWidth / this.svg.clientHeight;
+    const w = h * (Number.isFinite(ratio) && ratio > 0 ? ratio : 1);
     // 盡量不露出城市範圍外的空白
     const clamp = (v, len) => (len >= this.map.size + 1 ? v : Math.min(Math.max(v, -0.5), this.map.size - 0.5 - len));
     this.view = [clamp(x + span / 2 - w / 2, w), clamp(y - span * 0.15, h), w, h];
