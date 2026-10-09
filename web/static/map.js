@@ -135,10 +135,9 @@ export class CityMapView {
     // 寬高比跟著 app.css 的 .map aspect-ratio（手機正方形、寬螢幕 4:3）
     const ratio = this.svg.clientWidth / this.svg.clientHeight;
     const w = h * (Number.isFinite(ratio) && ratio > 0 ? ratio : 1);
-    // 視野比城市小時不超出城市；比城市大時置中，超出的部分由外圍裝飾道路填滿
-    const size = this.map.size;
-    const clamp = (v, len) => (len >= size + 1 ? (size - 1) / 2 - len / 2 : Math.min(Math.max(v, -0.5), size - 0.5 - len));
-    this.view = [clamp(x + span / 2 - w / 2, w), clamp(y - span * 0.15, h), w, h];
+    // 以點為中心取景，不限制在城市範圍內：超出城市的部分由外圍裝飾道路填滿。
+    // 若硬把視野夾在城市內，靠近城市邊緣的外送員與圖釘會被推到畫面邊上切掉一半。
+    this.view = [x + span / 2 - w / 2, y - span * 0.15, w, h];
     this.svg.setAttribute("viewBox", this.view.join(" "));
     // 縮小時小路變細，避免擠成一片
     const pxPerUnit = (this.svg.clientWidth || 360) / w;
