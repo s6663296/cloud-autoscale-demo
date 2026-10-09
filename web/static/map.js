@@ -4,7 +4,7 @@
 import { decorations, fitView, polylineAt, roadPaths } from "./logic.js";
 
 const NS = "http://www.w3.org/2000/svg";
-const ASPECT = 4 / 3;
+const ASPECT = 1; // 與 app.css 的 .map aspect-ratio 一致
 const ROW_NAMES = ["中正路", "民生路", "忠孝路", "仁愛路"];
 const COL_NAMES = ["中山路", "復興路", "光復路", "敦化路"];
 const PIN_PATH = "M0 0C-3 -7 -14 -12 -14 -24A14 14 0 1 1 14 -24C14 -12 3 -7 0 0Z";

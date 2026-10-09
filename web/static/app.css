@@ -260,7 +260,7 @@ body[data-screen="tracking"] .screens { max-width: 1040px; }
   padding: 0 8px;
 }
 
-.map { display: block; width: 100%; aspect-ratio: 4 / 3; background: var(--map-bg); }
+.map { display: block; width: 100%; aspect-ratio: 1 / 1; background: var(--map-bg); }
 
 .track-body { text-align: center; padding: 18px 16px 16px; }
 .eta-label { font-size: 13px; color: var(--text-2); }
