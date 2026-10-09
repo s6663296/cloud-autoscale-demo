@@ -4,7 +4,6 @@
 import { decorations, fitView, polylineAt, roadPaths } from "./logic.js";
 
 const NS = "http://www.w3.org/2000/svg";
-const ASPECT = 1; // 與 app.css 的 .map aspect-ratio 一致
 const ROW_NAMES = ["中正路", "民生路", "忠孝路", "仁愛路"];
 const COL_NAMES = ["中山路", "復興路", "光復路", "敦化路"];
 const PIN_PATH = "M0 0C-3 -7 -14 -12 -14 -24A14 14 0 1 1 14 -24C14 -12 3 -7 0 0Z";
@@ -100,7 +99,8 @@ export class CityMapView {
     const [x, y, span] = fitView(points, this.map.size, { minSpan, pad: 2 });
     // 圖釘往上突出約 40px，上方多留一些空間避免被切掉
     const h = span * 1.2;
-    const w = h * ASPECT;
+    // 寬高比跟著 app.css 的 .map aspect-ratio（手機正方形、寬螢幕 4:3）
+    const w = h * ((this.svg.clientWidth / this.svg.clientHeight) || 1);
     // 盡量不露出城市範圍外的空白
     const clamp = (v, len) => (len >= this.map.size + 1 ? v : Math.min(Math.max(v, -0.5), this.map.size - 0.5 - len));
     this.view = [clamp(x + span / 2 - w / 2, w), clamp(y - span * 0.15, h), w, h];

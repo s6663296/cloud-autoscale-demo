@@ -429,6 +429,7 @@ function orderAgain() {
   state.qty = {};
   state.restaurant = null;
   $("#customer-form").reset();
+  $(".more-fields").open = false;
   show("home");
 }
 

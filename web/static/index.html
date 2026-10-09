@@ -50,9 +50,12 @@
           <p class="muted">全部選填。地址留空時，系統會隨機指定一個位置。</p>
           <form id="customer-form" class="customer" autocomplete="off">
             <label>地址<input name="address" maxlength="100" placeholder="例如：大學路 1 號"></label>
-            <label>姓名<input name="name" maxlength="40"></label>
-            <label>電話<input name="phone" inputmode="tel" maxlength="20"></label>
-            <label>給外送夥伴的備註<input name="note" maxlength="100"></label>
+            <details class="more-fields">
+              <summary>姓名、電話、備註</summary>
+              <label>姓名<input name="name" maxlength="40"></label>
+              <label>電話<input name="phone" inputmode="tel" maxlength="20"></label>
+              <label>給外送夥伴的備註<input name="note" maxlength="100"></label>
+            </details>
           </form>
         </div>
         <div class="card">
