@@ -58,6 +58,35 @@ def test_same_seed_same_response_except_compute_ms(client):
     assert a == b
 
 
+def _without_compute_ms(res):
+    data = res.json()
+    data.pop("compute_ms")
+    return data
+
+
+def test_same_order_id_same_result_on_both_versions(client):
+    """同一筆訂單（相同 order_id、未帶 seed）送往兩個版本，派單結果相同。"""
+    body = _order(order_id="student-order-1")
+    assert _without_compute_ms(client.post("/api/orders", json=body)) == _without_compute_ms(
+        client.post("/api/orders", json=body)
+    )
+
+
+def test_different_order_ids_are_random(client):
+    results = {
+        tuple(client.post("/api/orders", json=_order(order_id=f"order-{i}")).json()["customer_node"])
+        for i in range(8)
+    }
+    assert len(results) > 1
+
+
+def test_seed_overrides_order_id(client):
+    a = _without_compute_ms(client.post("/api/orders", json=_order(order_id="a", seed=5)))
+    b = _without_compute_ms(client.post("/api/orders", json=_order(order_id="b", seed=5)))
+    assert a.pop("order_id") == "a" and b.pop("order_id") == "b"
+    assert a == b
+
+
 def test_address_determines_customer_node(client):
     customer = {"address": "台北市中正區重慶南路一段122號"}
     a = client.post("/api/orders", json=_order(customer=customer)).json()

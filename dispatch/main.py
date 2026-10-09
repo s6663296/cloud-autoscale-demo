@@ -70,7 +70,8 @@ def create_app(allowed_origin: str = config.ALLOWED_ORIGIN) -> FastAPI:
 
     @app.post("/api/orders")
     def create_order(req: OrderRequest) -> dict:
-        rng = random.Random(req.seed) if req.seed is not None else random.Random()
+        # 以 order_id 為種子：同一筆訂單送往兩個版本得到相同結果，不同訂單之間仍為隨機
+        rng = random.Random(req.seed if req.seed is not None else req.order_id)
         order = Order(
             restaurant_id=req.restaurant_id,
             items=[(item.item_id, item.qty) for item in req.items],
