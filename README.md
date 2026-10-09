@@ -319,10 +319,10 @@ python -m loadtest probe --report-to <WEB_URL>
 |---|---|---|---|---|
 | `dispatch-fixed` | 1 / 512Mi | 4 | 30s | 1 |
 | `dispatch-auto` | 1 / 512Mi | 4 | 30s | 8 |
-| `web` | 1 / 512Mi | 250 | 3600s | 1 |
+| `web` | 1 / 512Mi | 250 | 300s | 1 |
 
 三個服務的 min-instances 平時為 0，展示前調整為 1，以避免冷啟動。
-
+`web` 的 timeout 設 300 秒：Debug 儀表板的 SSE 長連線最多維持 5 分鐘，之後由瀏覽器自動重連。若設 3600 秒，Cloud Run 汰換執行個體時，舊執行個體要等這些長連線結束才會釋放，而 `web` 上限只有 1 台，期間所有請求都會收到 429（Rate exceeded）。
 ```bash
 ./deploy.sh deploy   # 建置映像檔並部署三個服務
 ./deploy.sh warm     # min-instances 設為 1（展示前）
