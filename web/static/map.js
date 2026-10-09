@@ -90,6 +90,7 @@ export class CityMapView {
   applyTrack(track, durationMs) {
     this.stop();
     this.track = track;
+    this.follow();
     this.draw();
     const trail = track.trail;
     const started = performance.now();
@@ -103,6 +104,20 @@ export class CityMapView {
 
   stop() {
     cancelAnimationFrame(this.frame);
+  }
+
+  /**
+   * 外送員改道後，走過的路、接下來的路線或目的地可能落在目前視野外；
+   * 只要有一點超出（含邊緣留白），就以這些點重新取景，讓畫面跟著外送員。
+   */
+  follow() {
+    const { current, upcoming } = this.routes();
+    const points = [...this.track.trail, ...(current || []), ...(upcoming || []), this.result.customer_node];
+    const [vx, vy, vw, vh] = this.view;
+    const m = vw * 0.06;
+    // 圖釘往上突出，上緣多留一些
+    const inside = ([x, y]) => x >= vx + m && x <= vx + vw - m && y >= vy + vh * 0.15 && y <= vy + vh - m;
+    if (!points.every(inside)) this.setView(points, 12);
   }
 
   /** 不再使用這張地圖時呼叫。 */
