@@ -1,6 +1,7 @@
 """壓力測試執行：模擬顧客（下單後追蹤到送達）、每秒回報 web、probe 容量量測（README 第 7 節）。"""
 
 import asyncio
+import importlib.util
 import random
 import time
 from dataclasses import dataclass
@@ -20,6 +21,9 @@ TRACK_INTERVAL_S = 2.0
 MAX_TRACK_FAILURES = 5  # 連續失敗這麼多次就放棄追蹤，像真實顧客關掉 App
 # httpcore 每個請求都會掃描整個連線池（O(連線數)），連線多時把池子拆小、輪流使用
 POOL_SHARDS = 8
+# 雲端（HTTPS）改用 HTTP/2，所有請求共用少數幾條連線；HTTP/1.1 每個進行中請求各佔一條連線，
+# 上千條連線加上逾時後重連，會把家用路由器打掛。本機是 http://，httpx 照樣走 HTTP/1.1
+HTTP2 = importlib.util.find_spec("h2") is not None
 
 
 @dataclass
@@ -95,13 +99,13 @@ class Session:
         limits = httpx.Limits(max_connections=per_shard, max_keepalive_connections=per_shard)
         self.clients = {
             name: [
-                httpx.AsyncClient(limits=limits, timeout=self.timeout_s + 5, transport=target_transport)
+                httpx.AsyncClient(limits=limits, timeout=self.timeout_s + 5, transport=target_transport, http2=HTTP2)
                 for _ in range(POOL_SHARDS)
             ]
             for name in self.targets
         }
         self._next_shard = 0
-        self.web = httpx.AsyncClient(timeout=REPORT_TIMEOUT_S, transport=web_transport)
+        self.web = httpx.AsyncClient(timeout=REPORT_TIMEOUT_S, transport=web_transport, http2=HTTP2)
         self.loop = asyncio.get_running_loop()
         self.start = self.loop.time()
         self._reporter = asyncio.create_task(self._report_loop())
