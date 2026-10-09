@@ -86,6 +86,7 @@ flowchart LR
 - `CITY_GRID_SIZE × CITY_GRID_SIZE` 格狀路網，路口之間以上下左右相連。
 - 隨機封閉約 10% 路段，且保證路網維持連通。
 - 數條低權重主幹道（一般道路每段 30 秒，主幹道每段 15 秒）。
+- 一條河流橫越城市，沿著兩列路口之間蜿蜒：跨河與被河道斜穿的路段一律封閉，只有主幹道是橋，外送員必須繞到主幹道過河。封閉的路段計入約 10% 的封閉比例。
 - 6 家店家，每家 4 至 6 項餐點，各有價格與備餐時間。
 - 顧客地址為選填。填寫時以地址字串的雜湊對應至固定路口；未填寫時隨機選取路口。
 
@@ -203,7 +204,7 @@ flowchart LR
 |---|---|
 | `GET /` | 點餐頁 |
 | `GET /api/config` | `{ "fixed_url", "auto_url", "timeout_ms", "track_interval_ms" }` |
-| `GET /api/map` | 路網尺寸、封閉路段、主幹道、店家與菜單 |
+| `GET /api/map` | 路網尺寸、封閉路段、主幹道、河流、店家與菜單 |
 | `POST /api/reports/order` | 手機回報單筆訂單於兩個版本的派單結果 |
 | `POST /api/reports/track` | 手機回報單次追蹤請求的結果 |
 | `POST /api/reports/loadtest` | 壓力測試每秒回報彙總 |

@@ -82,6 +82,16 @@ def test_arterials_are_complete_lines_with_lower_cost(city60):
         assert s == (ARTERIAL_S if on_arterial else ROAD_S)
 
 
+def test_river_crossable_only_on_arterial_bridges(city60):
+    rows, cols = city60.river, city60.arterial_cols
+    assert len(rows) == 60
+    assert all(abs(a - b) <= 1 for a, b in zip(rows, rows[1:]))
+    open_edges = set(city60.edges)
+    for x, r in enumerate(rows):
+        crossing = ((x, r), (x, r + 1))
+        assert (crossing in open_edges) == (x in cols)
+
+
 def test_six_restaurants_on_distinct_nodes_with_menus(city60):
     rs = city60.restaurants
     assert [r["id"] for r in rs] == ["r1", "r2", "r3", "r4", "r5", "r6"]
@@ -125,6 +135,7 @@ def test_map_json_serializable_and_small(city60):
     assert data["base_s"] == {"road": ROAD_S, "arterial": ARTERIAL_S}
     assert len(data["closed"]) == len(city60.closed)
     assert data["arterials"] == {"rows": city60.arterial_rows, "cols": city60.arterial_cols}
+    assert data["river"] == city60.river
     assert [r["id"] for r in data["restaurants"]] == ["r1", "r2", "r3", "r4", "r5", "r6"]
     assert json.loads(text) == data
 

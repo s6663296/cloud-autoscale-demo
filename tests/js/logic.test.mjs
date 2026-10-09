@@ -164,12 +164,10 @@ test("decorations 對同一張地圖結果固定，且都在地圖範圍內", ()
   for (const p of a.parks) {
     assert.ok(p.x >= 0 && p.y >= 0 && p.x + p.w <= 59 && p.y + p.h <= 59);
   }
-  assert.ok(a.river.length >= 2);
-  assert.ok(a.river.every(([x, y]) => x >= -1 && x <= 60 && y >= -1 && y <= 60));
   assert.notDeepEqual(decorations({ size: 30 }), a);
 });
 
-import { outskirtPaths, trackReportBody } from "../../web/static/logic.js";
+import { outskirtPaths, riverLine, trackReportBody } from "../../web/static/logic.js";
 
 test("trackReportBody 逾時記為 10000 毫秒", () => {
   assert.deepEqual(trackReportBody("auto", { outcome: "ok", latencyMs: 17.6, instanceId: "00bf" }), {
@@ -189,4 +187,9 @@ test("outskirtPaths 只畫城市外圍，主幹道沿原行列延伸", () => {
   assert.ok(paths.roads.includes("M-1 -1H3") && paths.roads.includes("M-1 3H3"));
   // 不會畫穿過城市內部
   assert.ok(!paths.roads.includes("M0 1H") && !paths.arterials.includes("M-1 1H3"));
+});
+
+test("riverLine 畫在兩列之間並延伸到外圍", () => {
+  assert.deepEqual(riverLine({ size: 3, river: [1, 1, 0] }, 2), [[-2, 1.5], [0, 1.5], [1, 1.5], [2, 0.5], [4, 0.5]]);
+  assert.deepEqual(riverLine({ size: 3, river: [] }, 2), []);
 });

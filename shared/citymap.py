@@ -4,6 +4,7 @@
 """
 
 import hashlib
+import math
 import random
 from collections import deque
 from functools import lru_cache
@@ -49,7 +50,8 @@ class CityMap:
     - edges：開放路段（無向，u < v），索引即邊 ID
     - base_s：各開放路段的基礎通行秒數，與 edges 同索引
     - adjacency：路口 → [(鄰接路口, 邊 ID)]
-    - closed：封閉路段
+    - closed：封閉路段（含被河流截斷的路段）
+    - river：河流位置，river[x] = r 表示第 x 行的河道在第 r 與 r+1 列路口之間
     """
 
     def __init__(self, size: int, seed: int):
@@ -58,7 +60,10 @@ class CityMap:
         self.arterial_rows = _pick_lines(rng, size)
         self.arterial_cols = _pick_lines(rng, size)
         all_edges = _grid_edges(size)
-        self.closed = _close_edges(rng, size, all_edges, self._is_arterial)
+        # 河流用獨立的亂數，不影響其他元素的產生順序
+        self.river = _river_rows(random.Random(seed + 1), size)
+        river_edges = _river_edges(self.river, size, self._is_arterial)
+        self.closed = _close_edges(rng, size, all_edges, self._is_arterial, river_edges)
         closed = set(self.closed)
         self.edges: list[Edge] = [e for e in all_edges if e not in closed]
         self.base_s = [ARTERIAL_S if self._is_arterial(e) else ROAD_S for e in self.edges]
@@ -91,6 +96,7 @@ class CityMap:
             "base_s": {"road": ROAD_S, "arterial": ARTERIAL_S},
             "closed": [[list(u), list(v)] for u, v in self.closed],
             "arterials": {"rows": list(self.arterial_rows), "cols": list(self.arterial_cols)},
+            "river": list(self.river),
             "restaurants": [
                 {
                     "id": r["id"],
@@ -135,20 +141,52 @@ def _pick_lines(rng: random.Random, size: int) -> list[int]:
     return lines
 
 
-def _close_edges(rng, size, all_edges, is_arterial) -> list[Edge]:
-    """逐條隨機嘗試移除非主幹道路段，移除後兩端仍互通才真正封閉。
+def _river_rows(rng: random.Random, size: int) -> list[int]:
+    """河道沿著列與列之間蜿蜒；相鄰兩行最多差一列，河道不會蓋住任何路口。"""
+    if size < 4:
+        return []
+    base = size * (0.55 + rng.random() * 0.3)
+    phase = rng.random() * math.tau
+    freq = 7.2 / size  # 整條河約一個多波
+    rows = []
+    for x in range(size):
+        r = round(base + math.sin(x * freq + phase) * size * 0.08)
+        if rows:
+            r = max(rows[-1] - 1, min(rows[-1] + 1, r))
+        rows.append(max(0, min(size - 2, r)))
+    return rows
+
+
+def _river_edges(rows: list[int], size: int, is_arterial) -> list[Edge]:
+    """被河流截斷的路段：跨河的直向路段，以及河道轉彎時斜穿過的橫向路段。主幹道是橋，不截斷。"""
+    edges = []
+    for x, r in enumerate(rows):
+        edges.append(((x, r), (x, r + 1)))
+        if x + 1 < len(rows) and rows[x + 1] != r:
+            m = max(r, rows[x + 1])
+            edges.append(((x, m), (x + 1, m)))
+    return [e for e in edges if not is_arterial(e)]
+
+
+def _close_edges(rng, size, all_edges, is_arterial, preclosed=()) -> list[Edge]:
+    """先封閉 preclosed（河流），再逐條隨機嘗試移除非主幹道路段，移除後兩端仍互通才真正封閉。
 
     原圖連通時，移除 (u, v) 後只要 u 仍可到達 v，整張圖就仍連通。
+    河流只截斷非主幹道，主幹道橫跨全城，因此封閉河流後整張圖仍連通。
     """
     neighbors: dict[Node, set[Node]] = {(x, y): set() for y in range(size) for x in range(size)}
     for u, v in all_edges:
         neighbors[u].add(v)
         neighbors[v].add(u)
+    pre = set(preclosed)
+    for u, v in pre:
+        neighbors[u].discard(v)
+        neighbors[v].discard(u)
 
-    candidates = [e for e in all_edges if not is_arterial(e)]
+    candidates = [e for e in all_edges if not is_arterial(e) and e not in pre]
     rng.shuffle(candidates)
     target = round(len(all_edges) * CLOSED_RATIO)
-    closed = []
+    closed = list(pre)
     for u, v in candidates:
         if len(closed) >= target:
             break

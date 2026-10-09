@@ -1,7 +1,7 @@
 // 外送地圖：以 SVG 畫成 Google 地圖風格。
 // 外送員位置由後端的追蹤回應決定，前端只在兩次回應之間沿 trail 平滑移動。
 
-import { decorations, fitView, outskirtPaths, polylineAt, roadPaths } from "./logic.js";
+import { decorations, fitView, outskirtPaths, polylineAt, riverLine, roadPaths } from "./logic.js";
 
 const NS = "http://www.w3.org/2000/svg";
 const OUTSKIRTS = 40; // 城市外圍裝飾道路的寬度（格），需大於視野可能超出城市的範圍
@@ -44,13 +44,15 @@ export class CityMapView {
     for (const p of deco.parks) {
       el("rect", { x: p.x + 0.1, y: p.y + 0.1, width: p.w - 0.2, height: p.h - 0.2, rx: 0.4, class: "park" }, base);
     }
-    // 河流兩端水平延伸到外圍邊緣
-    const river = deco.river;
-    const ends = [[-OUTSKIRTS, river[0][1]], ...river, [size - 1 + OUTSKIRTS, river[river.length - 1][1]]];
-    el("path", {
-      d: ends.map(([x, y], i) => `${i ? "L" : "M"}${x} ${y}`).join(""),
-      class: "water", "stroke-width": 2.2,
-    }, base);
+    // 河道畫在兩列路口之間，寬度小於一格，不會蓋住旁邊的道路；以相鄰點中點做二次曲線，轉彎較圓順
+    const rp = riverLine(map, OUTSKIRTS);
+    let riverD = rp.length ? `M${rp[0][0]} ${rp[0][1]}` : "";
+    for (let i = 1; i < rp.length - 1; i++) {
+      const [x, y] = rp[i];
+      riverD += `Q${x} ${y} ${(x + rp[i + 1][0]) / 2} ${(y + rp[i + 1][1]) / 2}`;
+    }
+    if (rp.length > 1) riverD += `L${rp[rp.length - 1][0]} ${rp[rp.length - 1][1]}`;
+    el("path", { d: riverD, class: "water", "stroke-width": 0.6 }, base);
     const arterials = paths.arterials + outskirts.arterials;
     el("path", { d: arterials, class: "arterial-edge", ...nonScaling }, base);
     el("path", { d: arterials, class: "arterial", ...nonScaling }, base);

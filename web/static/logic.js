@@ -108,6 +108,17 @@ export function roadPaths(map) {
 }
 
 /**
+ * 河流折線：後端的 river[x] = r 表示第 x 行的河道在第 r 與 r+1 列之間（那裡的路段已封閉，主幹道是橋），
+ * 畫在兩列中間，兩端水平延伸 margin 格到外圍。
+ */
+export function riverLine(map, margin) {
+  const rows = map.river || [];
+  if (!rows.length) return [];
+  const pts = rows.map((r, x) => [x, r + 0.5]);
+  return [[-margin, pts[0][1]], ...pts, [map.size - 1 + margin, pts[pts.length - 1][1]]];
+}
+
+/**
  * 城市外圍的裝飾道路（向外延伸 margin 格），讓視野超出城市時仍看得到街道而不是空白。
  * 只畫城市範圍外的部分，不會蓋掉城市內的封閉路段；主幹道沿原本的行列延伸出去。
  */
@@ -241,12 +252,5 @@ export function decorations(map) {
     const h = span(2, Math.max(2, Math.round(size / 12)));
     parks.push({ x: span(0, size - 1 - w), y: span(0, size - 1 - h), w, h });
   }
-  const river = [];
-  const base = size * (0.55 + rand() * 0.3);
-  for (let i = 0; i <= 8; i++) {
-    const x = -1 + ((size + 1) * i) / 8;
-    const y = Math.min(size, Math.max(-1, base + Math.sin(i * 0.9 + rand()) * size * 0.08));
-    river.push([Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
-  }
-  return { parks, river };
+  return { parks };
 }
