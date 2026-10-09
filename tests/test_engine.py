@@ -168,7 +168,7 @@ def test_schedule_order(city, seed):
     result = dispatch_order(_order(city), NOW + seed * 600, random.Random(seed), city=city, params=PARAMS)
     s = result["schedule"]
     assert s["arrive_restaurant_s"] <= s["pickup_s"] < s["deliver_s"]
-    assert s["pickup_s"] >= 6 * 60  # 紅燒牛肉麵備餐 6 分鐘
+    assert s["pickup_s"] >= 9 * 60  # 紅燒牛肉麵備餐 9 分鐘
     assert result["eta_minutes"] * 60 >= s["deliver_s"]
 
 
