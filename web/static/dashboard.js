@@ -4,9 +4,9 @@ import { chartPath, formatMs, formatPct, TARGETS } from "./logic.js";
 
 const NS = "http://www.w3.org/2000/svg";
 const NAME = { fixed: "固定版", auto: "擴展版" };
-const W = 320;
-const H = 140;
-const PAD = { left: 40, right: 8, top: 8, bottom: 20 };
+// 圖表高度固定、寬度依實際版面，字級不會跟著縮放
+const H = 72;
+const PAD = { left: 34, right: 4, top: 6, bottom: 14 };
 
 function el(name, attrs = {}, parent = null) {
   const node = document.createElementNS(NS, name);
@@ -42,17 +42,17 @@ const METRICS = {
   },
 };
 
-export function initDashboard({ toggle, panel, layout }) {
+export function initDashboard({ toggle, panel }) {
   const status = panel.querySelector("#dash-status");
-  const students = panel.querySelector("#dash-students");
   const charts = [...panel.querySelectorAll(".chart")].map(setupChart);
+  // 手機版預設收起趨勢圖，讓儀表板與兩個追蹤區塊擠得進同一個畫面
+  panel.querySelector("#dash-charts").open = matchMedia("(min-width: 768px)").matches;
   let source = null;
   let latest = null;
 
   function open() {
     panel.hidden = false;
     toggle.setAttribute("aria-expanded", "true");
-    layout.classList.add("with-dashboard");
     status.textContent = "連線中…";
     source = new EventSource("/api/stream");
     source.addEventListener("snapshot", (e) => {
@@ -68,7 +68,6 @@ export function initDashboard({ toggle, panel, layout }) {
     source = null;
     panel.hidden = true;
     toggle.setAttribute("aria-expanded", "false");
-    layout.classList.remove("with-dashboard");
   }
 
   toggle.addEventListener("click", () => (source ? close() : open()));
@@ -78,15 +77,6 @@ export function initDashboard({ toggle, panel, layout }) {
     for (const target of TARGETS) {
       renderStats(panel.querySelector(`.dash-target[data-target="${target}"] .stats`), snap.targets[target]);
     }
-    const s = snap.students;
-    students.replaceChildren(
-      "觀眾訂單（最近 60 秒）",
-      html("strong", ` ${s.orders} `),
-      "筆 · 固定版成功",
-      html("strong", ` ${s.fixed_ok} `),
-      "· 擴展版成功",
-      html("strong", ` ${s.auto_ok}`),
-    );
     for (const chart of charts) chart.update(snap.series);
   }
 }
@@ -94,12 +84,12 @@ export function initDashboard({ toggle, panel, layout }) {
 function renderStats(dl, t) {
   const f = t.failures;
   const rows = [
-    ["執行個體", String(t.instances)],
+    ["個體數", String(t.instances)],
     ["RPS", t.rps.toFixed(t.rps < 1 ? 2 : 1)],
     ["成功率", formatPct(t.success_rate)],
     ["p50", formatMs(t.p50_ms)],
     ["p95", formatMs(t.p95_ms)],
-    ["逾時／忙碌／錯誤", `${f.timeout}／${f.busy}／${f.error}`, "small"],
+    ["逾時/忙/錯", `${f.timeout}/${f.busy}/${f.error}`, "small"],
   ];
   dl.replaceChildren(...rows.map(([label, value, cls]) => {
     const div = document.createElement("div");
@@ -118,8 +108,11 @@ function setupChart(figure) {
   let hover = null;
   let x = () => 0;
   let y = () => 0;
+  let W = 320;
 
   function draw() {
+    W = svg.clientWidth || W;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
     const values = series.flatMap((p) => TARGETS.map((t) => p[t][key])).filter((v) => v !== null);
     const max = metric.max(values);
     const n = Math.max(series.length - 1, 1);
@@ -154,7 +147,8 @@ function setupChart(figure) {
     legend.replaceChildren(...TARGETS.map((target) => {
       const last = [...series].reverse().find((p) => p[target][key] !== null);
       const item = html("span");
-      item.append(html("i", undefined, `swatch swatch-${target}`), `${NAME[target]} `, html("strong", metric.format(last ? last[target][key] : null)));
+      item.title = NAME[target];
+      item.append(html("i", undefined, `swatch swatch-${target}`), html("strong", metric.format(last ? last[target][key] : null)));
       return item;
     }));
     drawHover();
@@ -198,6 +192,8 @@ function setupChart(figure) {
     hover = null;
     draw();
   });
+  // 寬度改變（含趨勢圖從收起展開）時依新寬度重畫
+  new ResizeObserver(() => series.length && draw()).observe(svg);
 
   return {
     update(next) {

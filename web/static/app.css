@@ -99,8 +99,10 @@ button:disabled { cursor: default; }
 
 /* --- 版面 --- */
 
-.layout { display: grid; grid-template-columns: minmax(0, 480px); justify-content: center; }
-.screens { width: 100%; min-width: 0; }
+/* 直向排列：Debug 儀表板開啟時在最上方置中，畫面內容往下擠 */
+.layout { display: flex; flex-direction: column; align-items: center; }
+.screens { width: 100%; max-width: 480px; min-width: 0; }
+body[data-screen="tracking"] .screens { max-width: 1040px; }
 .screen { min-height: calc(100vh - 56px); padding-bottom: 24px; }
 .section-title { padding: 20px 16px 10px; }
 .page-title { padding: 20px 16px 4px; }
@@ -130,11 +132,6 @@ button:disabled { cursor: default; }
 .wide { width: 100%; }
 
 /* --- 首頁 --- */
-
-.hero { background: var(--brand); color: #fff; padding: 16px 16px 20px; }
-.hero-label { font-size: 12px; opacity: 0.85; }
-.hero-address { font-size: 17px; font-weight: 700; }
-.hero-note { margin-top: 10px; font-size: 12px; background: rgba(255, 255, 255, 0.16); border-radius: 8px; padding: 6px 10px; }
 
 .restaurant-list { display: grid; gap: 16px; padding: 0 16px; }
 .restaurant-card {
@@ -239,7 +236,9 @@ button:disabled { cursor: default; }
 
 /* --- 追蹤頁 --- */
 
-.track { background: var(--surface); margin-bottom: 12px; }
+/* 左：固定容量版、右：自動擴展版；手機也維持左右並排，只縮小內容 */
+#tracks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.track { background: var(--surface); min-width: 0; }
 .track-head {
   display: flex;
   align-items: center;
@@ -281,8 +280,7 @@ button:disabled { cursor: default; }
 .progress.searching span:first-child::after { width: 40%; animation: search 1.2s ease-in-out infinite alternate; }
 @keyframes search { from { transform: translateX(-60%); } to { transform: translateX(160%); } }
 .status-text { font-size: 15px; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 1.5em; font-variant-numeric: tabular-nums; }
-.status-meta, .track-meta { margin-top: 6px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.track-meta { margin-top: 2px; }
+.track-meta { margin-top: 6px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .track-meta.stale { color: var(--critical); font-weight: 600; }
 
 .spinner {
@@ -323,31 +321,36 @@ button:disabled { cursor: default; }
 /* --- Debug 儀表板 --- */
 
 .dashboard {
-  position: fixed;
-  inset: 56px 0 0 0;
-  z-index: 20;
-  overflow-y: auto;
+  order: -1;
+  width: 100%;
+  max-width: 1040px;
   background: var(--surface);
-  padding: 16px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
 }
-.dash-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 12px; }
-.dash-targets { display: grid; gap: 8px; }
-.dash-target { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #fafafa; }
-.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 8px 0 0; }
+.dash-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.dash-head h2 { font-size: 15px; }
+/* 兩欄固定左右並排，與下方追蹤區塊同寬同間距 */
+.dash-targets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.dash-target { min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: #fafafa; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 8px; margin: 4px 0 0; }
 .stats div { min-width: 0; }
-.stats dt { font-size: 11px; color: var(--text-2); }
-.stats dd { margin: 0; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stats dt { font-size: 11px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stats dd { margin: 0; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .stats dd.small { font-size: 13px; font-weight: 600; }
-.dash-students { margin: 12px 0; font-size: 13px; color: var(--text-2); }
-.dash-students strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.dash-charts { margin-top: 8px; }
+.dash-charts summary { font-size: 13px; font-weight: 600; color: var(--text-2); cursor: pointer; }
+.dash-charts .charts { margin-top: 4px; }
 
-.charts { display: grid; gap: 12px; }
-.chart { position: relative; margin: 0; }
-.chart figcaption { font-size: 13px; font-weight: 600; }
-.legend { display: flex; gap: 12px; font-size: 12px; color: var(--text-2); margin: 4px 0; }
+/* 兩張小圖一律左右並排；標題與最新值同一行 */
+.charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; }
+.chart { position: relative; margin: 0; min-width: 0; display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 0 8px; }
+.chart figcaption { font-size: 12px; font-weight: 600; }
+.chart .chart-svg { grid-column: 1 / -1; }
+.legend { display: flex; justify-content: flex-end; gap: 8px; font-size: 11px; color: var(--text-2); }
 .legend span { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 .legend strong { color: var(--text); }
-.chart-svg { display: block; width: 100%; height: auto; overflow: visible; touch-action: pan-y; }
+.chart-svg { display: block; width: 100%; height: 72px; overflow: visible; touch-action: pan-y; }
 .chart-svg .grid { stroke: var(--grid); stroke-width: 1; }
 .chart-svg .baseline { stroke: var(--axis); stroke-width: 1; }
 .chart-svg .tick { fill: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
@@ -356,7 +359,7 @@ button:disabled { cursor: default; }
 .chart-svg .hover-dot { stroke: var(--surface); stroke-width: 2; }
 .tooltip {
   position: absolute;
-  top: 28px;
+  top: 18px;
   pointer-events: none;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -374,19 +377,40 @@ button:disabled { cursor: default; }
 .fixed-fill { fill: var(--fixed); }
 .auto-fill { fill: var(--auto); }
 
+/* 窄螢幕：兩個追蹤區塊並排，縮小字級與留白 */
+@media (max-width: 599px) {
+  .dashboard { padding: 8px 0; }
+  .dash-head, .dash-charts { padding: 0 8px; }
+  .dash-targets, #tracks { gap: 6px; }
+  .dash-target { padding: 6px; border-radius: 8px; }
+  .dash-target h3 { font-size: 12px; }
+  .stats { gap: 2px 4px; }
+  .stats dt { font-size: 10px; }
+  .stats dd { font-size: 13px; }
+  .stats dd.small { font-size: 11px; }
+  .track-head { padding: 8px; gap: 4px; font-size: 13px; flex-wrap: wrap; }
+  .track-body { padding: 10px 6px; }
+  .eta-label { font-size: 11px; }
+  .eta { font-size: 18px; letter-spacing: 0; margin-bottom: 8px; }
+  .eta.small { font-size: 14px; }
+  .progress { gap: 3px; margin-bottom: 8px; }
+  .progress span { height: 4px; }
+  .status-text { font-size: 12px; gap: 4px; }
+  .track-meta { font-size: 11px; }
+  .spinner { width: 12px; height: 12px; }
+  .rider-card { gap: 6px; padding: 8px; font-size: 12px; }
+  .avatar { width: 32px; height: 32px; font-size: 16px; }
+}
+
 @media (min-width: 768px) {
-  .layout.with-dashboard { grid-template-columns: 480px minmax(0, 720px); gap: 16px; padding: 0 16px; }
-  .layout.with-dashboard .dashboard {
-    position: sticky;
-    inset: auto;
-    top: 72px;
-    align-self: start;
+  .layout { padding: 0 16px; }
+  .dashboard {
     margin-top: 16px;
-    max-height: calc(100vh - 88px);
+    border-bottom: none;
     border-radius: var(--radius);
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
   }
-  .dash-targets, .charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body[data-screen="tracking"] .track { border-radius: var(--radius); overflow: hidden; }
 }
 
 @media (prefers-reduced-motion: reduce) {

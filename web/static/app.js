@@ -4,7 +4,7 @@
 
 import { initDashboard } from "./dashboard.js";
 import {
-  buildOrderBody, cartLines, cartSummary, etaText, formatMs, makeOrderId,
+  buildOrderBody, cartLines, cartSummary, etaText, makeOrderId,
   outcomeFromStatus, progressFromTrack, reportBody, TARGETS, trackReportBody,
 } from "./logic.js";
 import { CityMapView } from "./map.js";
@@ -61,6 +61,7 @@ async function getJSON(url) {
 
 function show(name, { push = true } = {}) {
   state.screen = name;
+  document.body.dataset.screen = name;
   for (const screen of document.querySelectorAll(".screen")) screen.hidden = screen.id !== `screen-${name}`;
   $("#back").hidden = name === "home" || (name === "tracking" && state.busy);
   window.scrollTo(0, 0);
@@ -225,7 +226,7 @@ async function postJSON(base, path, body, timeoutMs) {
     const latencyMs = performance.now() - start;
     if (ctrl.signal.aborted) return { outcome: "timeout", latencyMs, instanceId: null };
     // 瀏覽器無法區分服務未啟動與 CORS 被擋，兩者都會走到這裡
-    return { outcome: "error", detail: "無法連線（服務未啟動或 CORS 未允許此網址）", latencyMs, instanceId: null };
+    return { outcome: "error", detail: "無法連線", latencyMs, instanceId: null };
   } finally {
     clearTimeout(timer);
   }
@@ -259,7 +260,6 @@ function createTracks() {
       etaLabel: node.querySelector(".eta-label"),
       progress: node.querySelector(".progress"),
       status: node.querySelector(".status-text"),
-      meta: node.querySelector(".status-meta"),
       trackMeta: node.querySelector(".track-meta"),
       rider: node.querySelector(".rider-card"),
       target,
@@ -287,13 +287,8 @@ function setWaiting(track) {
   setSegments(track, 0, 0);
   track.waitText = html("span", "已等待 0.0 秒");
   track.status.replaceChildren(html("span", undefined, "spinner"), track.waitText);
-  track.meta.textContent = "";
   track.trackMeta.textContent = "";
   track.rider.hidden = true;
-}
-
-function shortId(id) {
-  return id.length > 14 ? `${id.slice(0, 14)}…` : id;
 }
 
 function setSuccess(track, r) {
@@ -304,8 +299,6 @@ function setSuccess(track, r) {
   track.progress.className = "progress";
   track.rider.hidden = false;
   track.rider.querySelector(".rider-name").textContent = d.rider.name;
-  track.meta.textContent = `派單回應 ${formatMs(r.latencyMs)} · 運算 ${d.compute_ms} ms · 執行個體 ${shortId(d.instance_id)}`;
-  track.trackMeta.textContent = "等待後端回報外送員位置…";
   track.view.showResult(d);
   showProgress(track, "to_restaurant", 0, d.schedule.deliver_s);
 }
@@ -349,8 +342,7 @@ async function trackLoop(track, base, orderId) {
     tracking = d.tracking;
     track.view.applyTrack(d, interval);
     showProgress(track, d.phase, d.sim_s, d.eta_s);
-    track.trackMeta.className = "track-meta muted";
-    track.trackMeta.textContent = `位置更新 ${formatMs(r.latencyMs)} · 運算 ${d.compute_ms} ms · 執行個體 ${shortId(d.instance_id)}`;
+    track.trackMeta.textContent = "";
     if (d.phase === "delivered") return;
   }
 }
@@ -367,7 +359,6 @@ function setFailed(track, r) {
     busy: `✗ 服務忙碌（${r.detail}）`,
     error: `✗ 錯誤：${r.detail}`,
   }[r.outcome];
-  track.meta.textContent = `等待 ${formatMs(r.latencyMs)}`;
 }
 
 function renderOrderDetail(body) {
@@ -444,7 +435,7 @@ function orderAgain() {
 // --- 啟動 ------------------------------------------------------------------
 
 async function init() {
-  initDashboard({ toggle: $("#debug-toggle"), panel: $("#dashboard"), layout: $(".layout") });
+  initDashboard({ toggle: $("#debug-toggle"), panel: $("#dashboard") });
   history.replaceState({ screen: "home" }, "");
   $("#back").addEventListener("click", () => history.back());
   $("#view-cart").addEventListener("click", () => {

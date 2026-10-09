@@ -19,11 +19,6 @@
     <main class="screens">
       <!-- 首頁：店家列表 -->
       <section id="screen-home" class="screen">
-        <div class="hero">
-          <p class="hero-label">外送至</p>
-          <p class="hero-address">📍 你目前的位置</p>
-          <p class="hero-note">同一筆訂單會同時送往「固定容量版」與「自動擴展版」兩套系統</p>
-        </div>
         <h2 class="section-title">附近餐廳</h2>
         <div id="restaurants" class="restaurant-list"></div>
         <p id="load-error" class="error-text" hidden></p>
@@ -90,34 +85,37 @@
 
     <aside id="dashboard" class="dashboard" hidden aria-label="Debug 儀表板">
       <div class="dash-head">
-        <h2>Debug 儀表板</h2>
+        <h2>Debug</h2>
         <span id="dash-status" class="muted">連線中…</span>
       </div>
+      <!-- 左右兩欄對齊下方的兩個追蹤區塊，像兩台模擬器並排 -->
       <div class="dash-targets">
         <article class="dash-target" data-target="fixed">
-          <h3><span class="swatch swatch-fixed"></span>固定容量版 <span class="tag">max 1</span></h3>
+          <h3><span class="swatch swatch-fixed"></span>固定版</h3>
           <dl class="stats"></dl>
         </article>
         <article class="dash-target" data-target="auto">
-          <h3><span class="swatch swatch-auto"></span>自動擴展版 <span class="tag">auto</span></h3>
+          <h3><span class="swatch swatch-auto"></span>擴展版</h3>
           <dl class="stats"></dl>
         </article>
       </div>
-      <p id="dash-students" class="dash-students"></p>
-      <div class="charts">
-        <figure class="chart" data-metric="success_rate">
-          <figcaption>成功率（最近 10 分鐘）</figcaption>
-          <div class="legend"></div>
-          <svg class="chart-svg" viewBox="0 0 320 140" role="img" aria-label="成功率趨勢"></svg>
-          <div class="tooltip" hidden></div>
-        </figure>
-        <figure class="chart" data-metric="p95_ms">
-          <figcaption>p95 延遲（最近 10 分鐘）</figcaption>
-          <div class="legend"></div>
-          <svg class="chart-svg" viewBox="0 0 320 140" role="img" aria-label="p95 延遲趨勢"></svg>
-          <div class="tooltip" hidden></div>
-        </figure>
-      </div>
+      <details id="dash-charts" class="dash-charts">
+        <summary>趨勢圖（最近 10 分鐘）</summary>
+        <div class="charts">
+          <figure class="chart" data-metric="success_rate">
+            <figcaption>成功率</figcaption>
+            <div class="legend"></div>
+            <svg class="chart-svg" role="img" aria-label="成功率趨勢"></svg>
+            <div class="tooltip" hidden></div>
+          </figure>
+          <figure class="chart" data-metric="p95_ms">
+            <figcaption>p95 延遲</figcaption>
+            <div class="legend"></div>
+            <svg class="chart-svg" role="img" aria-label="p95 延遲趨勢"></svg>
+            <div class="tooltip" hidden></div>
+          </figure>
+        </div>
+      </details>
     </aside>
   </div>
 
@@ -130,7 +128,6 @@
         <p class="eta"></p>
         <div class="progress" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
         <p class="status-text"></p>
-        <p class="status-meta muted"></p>
         <p class="track-meta muted"></p>
       </div>
       <div class="rider-card" hidden>
