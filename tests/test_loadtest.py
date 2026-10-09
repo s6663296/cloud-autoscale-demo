@@ -384,3 +384,44 @@ def test_probe_finds_capacity():
     assert capacity == 3, lines
     assert any("容量" in line for line in lines)
     assert web.total("fixed", "ok") > 0
+
+
+# --- 壓測工具本身的效能（避免壓測工具成為瓶頸）------------------------------
+
+
+def test_httpcore_async_detection_is_cached():
+    """httpcore 每個請求都會 import sniffio；沒有安裝時每次都會掃描整個 sys.path，
+    讓壓測工具在每秒數百個請求時吃滿 CPU。sniffio 必須存在，import 才會被快取。"""
+    import sys
+
+    from httpcore._synchronization import current_async_library
+
+    async def detect():
+        return current_async_library()
+
+    assert asyncio.run(detect()) == "asyncio"
+    assert sys.modules.get("sniffio") is not None
+
+
+def test_requests_rotate_across_pool_shards(monkeypatch):
+    """每個目標拆成多個小連線池輪流使用，避免 httpcore 每次掃描整個大連線池。"""
+    from loadtest import runner
+
+    used = []
+
+    async def fake_send(client, url, path, body, timeout_s):
+        used.append(id(client))
+        return runner.Result("ok", 1.0, "i", {"tracking": {}, "phase": "delivered"})
+
+    monkeypatch.setattr(runner, "send_request", fake_send)
+
+    async def go():
+        session = runner.Session({"fixed": "http://f"}, "http://web", stop=asyncio.Event(), out=lambda line: None,
+                                 web_transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+        async with session as s:
+            assert len(s.clients["fixed"]) == runner.POOL_SHARDS
+            for _ in range(runner.POOL_SHARDS * 2):
+                await s._request("fixed", "/api/orders", {})
+
+    asyncio.run(go())
+    assert len(set(used)) == runner.POOL_SHARDS

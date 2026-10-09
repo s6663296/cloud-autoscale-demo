@@ -18,6 +18,8 @@ TIMEOUT_LATENCY_MS = 15000
 REPORT_TIMEOUT_S = 3.0
 TRACK_INTERVAL_S = 2.0
 MAX_TRACK_FAILURES = 5  # 連續失敗這麼多次就放棄追蹤，像真實顧客關掉 App
+# httpcore 每個請求都會掃描整個連線池（O(連線數)），連線多時把池子拆小、輪流使用
+POOL_SHARDS = 8
 
 
 @dataclass
@@ -87,11 +89,16 @@ class Session:
 
     async def __aenter__(self) -> "Session":
         target_transport, web_transport = self._transports
-        limits = httpx.Limits(max_connections=self.max_inflight, max_keepalive_connections=self.max_inflight)
+        per_shard = max(1, -(-self.max_inflight // POOL_SHARDS))
+        limits = httpx.Limits(max_connections=per_shard, max_keepalive_connections=per_shard)
         self.clients = {
-            name: httpx.AsyncClient(limits=limits, timeout=self.timeout_s + 5, transport=target_transport)
+            name: [
+                httpx.AsyncClient(limits=limits, timeout=self.timeout_s + 5, transport=target_transport)
+                for _ in range(POOL_SHARDS)
+            ]
             for name in self.targets
         }
+        self._next_shard = 0
         self.web = httpx.AsyncClient(timeout=REPORT_TIMEOUT_S, transport=web_transport)
         self.loop = asyncio.get_running_loop()
         self.start = self.loop.time()
@@ -105,7 +112,7 @@ class Session:
         await asyncio.gather(self._reporter, *self._customers, return_exceptions=True)
         self._flush()  # 最後一筆回報
         await asyncio.gather(*self._reports, return_exceptions=True)
-        for client in (*self.clients.values(), self.web):
+        for client in (*(c for shards in self.clients.values() for c in shards), self.web):
             await client.aclose()
 
     # --- 模擬顧客 -----------------------------------------------------------
@@ -151,7 +158,9 @@ class Session:
         self.agg.sent(name, order=is_order)
         self.inflight[name] += 1
         try:
-            res = await send_request(self.clients[name], self.targets[name], path, body, self.timeout_s)
+            self._next_shard = (self._next_shard + 1) % POOL_SHARDS
+            client = self.clients[name][self._next_shard]
+            res = await send_request(client, self.targets[name], path, body, self.timeout_s)
         finally:
             self.inflight[name] -= 1
         self.agg.completed(name, res.outcome, res.latency_ms, res.instance_id)
