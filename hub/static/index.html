@@ -3,9 +3,102 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>外送快閃</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script type="module" src="/static/app.js"></script>
 </head>
 <body>
-  <p>外送快閃 hub 運作中。點餐頁將於 P5 實作。</p>
+  <header class="topbar">
+    <div>
+      <h1>外送快閃</h1>
+      <p class="subtitle">同一筆訂單，同時送往兩種部署</p>
+    </div>
+    <button id="debug-toggle" class="debug-toggle" type="button" aria-expanded="false" aria-controls="dashboard">Debug</button>
+  </header>
+
+  <main class="layout">
+    <section id="dashboard" class="panel dashboard" hidden aria-label="Debug 儀表板">
+      <div class="dash-head">
+        <h2>Debug 儀表板</h2>
+        <span id="dash-status" class="muted">連線中…</span>
+      </div>
+      <div class="dash-targets">
+        <article class="dash-target" data-target="fixed">
+          <h3><span class="swatch swatch-fixed"></span>固定容量版 <span class="tag">max 1</span></h3>
+          <dl class="stats"></dl>
+        </article>
+        <article class="dash-target" data-target="auto">
+          <h3><span class="swatch swatch-auto"></span>自動擴展版 <span class="tag">auto</span></h3>
+          <dl class="stats"></dl>
+        </article>
+      </div>
+      <p id="dash-students" class="dash-students"></p>
+      <div class="charts">
+        <figure class="chart" data-metric="success_rate">
+          <figcaption>成功率（最近 10 分鐘）</figcaption>
+          <div class="legend"></div>
+          <svg class="chart-svg" viewBox="0 0 320 140" role="img" aria-label="成功率趨勢"></svg>
+          <div class="tooltip" hidden></div>
+        </figure>
+        <figure class="chart" data-metric="p95_ms">
+          <figcaption>p95 延遲（最近 10 分鐘）</figcaption>
+          <div class="legend"></div>
+          <svg class="chart-svg" viewBox="0 0 320 140" role="img" aria-label="p95 延遲趨勢"></svg>
+          <div class="tooltip" hidden></div>
+        </figure>
+      </div>
+    </section>
+
+    <div class="order-column">
+      <section class="panel">
+        <h2>1. 選擇店家</h2>
+        <div id="restaurants" class="restaurants" role="radiogroup" aria-label="店家"></div>
+        <p id="load-error" class="error-text" hidden></p>
+      </section>
+
+      <section id="menu-panel" class="panel" hidden>
+        <h2 id="menu-title">2. 選擇餐點</h2>
+        <ul id="menu" class="menu"></ul>
+        <details class="customer">
+          <summary>顧客資料（選填）</summary>
+          <label>姓名<input name="name" autocomplete="off" maxlength="40"></label>
+          <label>電話<input name="phone" inputmode="tel" autocomplete="off" maxlength="20"></label>
+          <label>地址<input name="address" autocomplete="off" maxlength="100" placeholder="留空則隨機指定位置"></label>
+          <label>備註<input name="note" autocomplete="off" maxlength="100"></label>
+        </details>
+        <div class="submit-row">
+          <span id="total" class="total">NT$ 0</span>
+          <button id="submit" class="primary" type="button" disabled>送出訂單</button>
+        </div>
+      </section>
+
+      <section id="results" class="panel" hidden>
+        <h2>3. 派單結果</h2>
+        <div class="status-cards">
+          <article class="status-card" data-target="fixed">
+            <h3><span class="swatch swatch-fixed"></span>固定容量版</h3>
+            <div class="status-body"></div>
+          </article>
+          <article class="status-card" data-target="auto">
+            <h3><span class="swatch swatch-auto"></span>自動擴展版</h3>
+            <div class="status-body"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="map-head">
+          <h2>外送地圖</h2>
+          <div class="map-switch" role="group" aria-label="顯示哪個版本的結果">
+            <button type="button" data-target="fixed" disabled><span class="swatch swatch-fixed"></span>固定版</button>
+            <button type="button" data-target="auto" disabled><span class="swatch swatch-auto"></span>擴展版</button>
+          </div>
+        </div>
+        <svg id="map" class="map" role="img" aria-label="城市地圖"></svg>
+        <p id="map-caption" class="muted map-caption">選擇店家並下單後，這裡會播放外送路線。</p>
+      </section>
+    </div>
+  </main>
 </body>
 </html>
