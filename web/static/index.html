@@ -9,24 +9,46 @@
   <script type="module" src="/static/app.js"></script>
 </head>
 <body>
+  <!-- 圖示（Lucide 風格線條圖示，內嵌避免外部資源）；以 <use href="#i-名稱"> 引用 -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-bag" viewBox="0 0 24 24"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4ZM3 6h18M16 10a4 4 0 0 1-8 0"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 5-5.5 10.2-7.4 11.8a1 1 0 0 1-1.2 0C9.5 20.2 4 15 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3M12 9v4M12 17h.01"/></symbol>
+    <symbol id="i-x-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></symbol>
+    <symbol id="i-bike" viewBox="0 0 24 24"><circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/></symbol>
+    <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  </svg>
+
   <header class="topbar">
-    <button id="back" class="icon-btn" type="button" aria-label="返回" hidden>‹</button>
-    <div class="brand"><span class="brand-mark">⚡</span>外送系統</div>
-    <button id="debug-toggle" class="debug-toggle" type="button" aria-expanded="false" aria-controls="dashboard">Debug</button>
+    <button id="back" class="icon-btn" type="button" aria-label="返回" hidden><svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg></button>
+    <div class="brand"><span class="brand-mark"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-zap"/></svg></span>外送系統</div>
+    <button id="debug-toggle" class="debug-toggle" type="button" aria-expanded="false" aria-controls="dashboard"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg>Debug</button>
   </header>
 
   <div class="layout">
     <main class="screens">
       <!-- 首頁：店家列表 -->
       <section id="screen-home" class="screen">
-        <h2 class="section-title">附近餐廳</h2>
-        <div id="restaurants" class="restaurant-list"></div>
+        <h1 class="section-title">附近餐廳</h1>
+        <!-- 載入前先放骨架卡片，避免畫面空白與版面跳動 -->
+        <div id="restaurants" class="restaurant-list" aria-busy="true">
+          <div class="restaurant-card skeleton" aria-hidden="true"><div class="thumb"></div><div class="body"><span></span><span></span></div></div>
+          <div class="restaurant-card skeleton" aria-hidden="true"><div class="thumb"></div><div class="body"><span></span><span></span></div></div>
+          <div class="restaurant-card skeleton" aria-hidden="true"><div class="thumb"></div><div class="body"><span></span><span></span></div></div>
+        </div>
         <p id="load-error" class="error-text" hidden></p>
       </section>
 
       <!-- 店家頁：菜單 -->
       <section id="screen-restaurant" class="screen" hidden>
-        <div id="r-cover" class="cover"></div>
+        <div id="r-cover" class="cover" aria-hidden="true"></div>
         <div class="r-info">
           <h1 id="r-name"></h1>
           <p id="r-meta" class="muted"></p>
@@ -35,7 +57,7 @@
         <ul id="menu" class="menu"></ul>
         <div id="cart-bar" class="bottom-bar" hidden>
           <button id="view-cart" class="cart-button" type="button">
-            <span id="cart-count" class="badge">0</span>
+            <span class="cart-icon"><svg class="icon" aria-hidden="true"><use href="#i-bag"/></svg><span id="cart-count" class="badge">0</span></span>
             <span>查看購物車</span>
             <span id="cart-total">NT$ 0</span>
           </button>
@@ -51,9 +73,9 @@
           <form id="customer-form" class="customer" autocomplete="off">
             <label>地址<input name="address" maxlength="100" placeholder="例如：大學路 1 號"></label>
             <details class="more-fields">
-              <summary>姓名、電話、備註</summary>
+              <summary><svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg>姓名、電話、備註</summary>
               <label>姓名<input name="name" maxlength="40"></label>
-              <label>電話<input name="phone" inputmode="tel" maxlength="20"></label>
+              <label>電話<input name="phone" type="tel" inputmode="tel" maxlength="20"></label>
               <label>給外送夥伴的備註<input name="note" maxlength="100"></label>
             </details>
           </form>
@@ -72,6 +94,7 @@
 
       <!-- 追蹤頁：兩個版本各一個完整追蹤區塊 -->
       <section id="screen-tracking" class="screen" hidden>
+        <h1 class="visually-hidden">配送追蹤</h1>
         <div id="tracks"></div>
         <div class="card order-detail">
           <h2>訂單詳情</h2>
@@ -122,6 +145,12 @@
     </aside>
   </div>
 
+  <!-- 懸浮球：離開追蹤頁後訂單仍在追蹤，點一下回到追蹤頁 -->
+  <button id="order-fab" class="order-fab" type="button" hidden>
+    <svg class="icon" aria-hidden="true"><use href="#i-bike"/></svg>
+    <span class="fab-label" aria-hidden="true"></span>
+  </button>
+
   <template id="track-template">
     <article class="track">
       <header class="track-head"><span class="swatch"></span><span class="track-title"></span><span class="tag"></span></header>
@@ -130,7 +159,7 @@
         <p class="eta-label">預估外送時間</p>
         <p class="eta"></p>
         <div class="progress" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
-        <p class="status-text"></p>
+        <p class="status-text" role="status"></p>
         <p class="track-meta muted"></p>
       </div>
       <div class="rider-card" hidden>
