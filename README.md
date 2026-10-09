@@ -78,7 +78,7 @@ flowchart LR
 ### 4.2 單筆訂單派單流程
 
 1. **路況權重**：依「目前分鐘數 + 路段」計算壅塞係數（1.0 至 2.0），路況隨時間變化，故結果不可快取。
-2. **外送員產生**：在店家半徑 `RIDER_RADIUS` 內隨機產生 `RIDERS` 位外送員。
+2. **外送員產生**：在離店家 `RIDER_MIN_RADIUS` 到 `RIDER_RADIUS` 之間（曼哈頓距離）隨機產生 `RIDERS` 位外送員。
 3. **候選篩選**：自店家執行一次完整 Dijkstra，取路網距離最近的 `CANDIDATES` 位。
 4. **替代路線**：以懲罰法求出每位候選人「外送員→店家」及「店家→顧客」各 `ALT_ROUTES` 條路線：每找到一條路線，即將其路段權重乘以 `ALT_PENALTY` 後重新搜尋。
 5. **評分**：`分數 = 最佳 ETA + RELIABILITY_WEIGHT × (最差替代路線 ETA − 最佳 ETA)`，替代路線 ETA 以未懲罰的權重計算。取分數最低者。
@@ -320,7 +320,7 @@ python -m loadtest probe --report-to <WEB_URL>
 |---|---|---|---|
 | `APP` | 全部 | — | `dispatch` 或 `web` |
 | `CITY_GRID_SIZE` | 全部 | 60 | 路網邊長，三個服務必須一致 |
-| `RIDERS` / `RIDER_RADIUS` | dispatch | 30 / 15 | 外送員數量與分布半徑 |
+| `RIDERS` / `RIDER_MIN_RADIUS` / `RIDER_RADIUS` | dispatch | 30 / 8 / 15 | 外送員數量與分布的最近、最遠距離 |
 | `CANDIDATES` | dispatch | 5 | 候選外送員數 |
 | `ALT_ROUTES` / `ALT_PENALTY` | dispatch | 3 / 1.5 | 替代路線數與懲罰倍率 |
 | `RELIABILITY_WEIGHT` | dispatch | 0.5 | 評分中路線穩定度的權重 |

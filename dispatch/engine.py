@@ -142,13 +142,14 @@ def _validate(city: CityMap, order: Order) -> tuple[dict, int, float]:
 
 
 def _spawn_riders(rng: random.Random, city: CityMap, center: Node, params: Params) -> list[dict]:
-    """在店家曼哈頓距離 rider_radius 內隨機產生外送員。"""
+    """在店家曼哈頓距離 rider_min_radius 到 rider_radius 之間隨機產生外送員。"""
     cx, cy = center
     rad = params.rider_radius
+    min_rad = min(params.rider_min_radius, rad)
     riders = []
     while len(riders) < params.riders:
         dx, dy = rng.randint(-rad, rad), rng.randint(-rad, rad)
         x, y = cx + dx, cy + dy
-        if abs(dx) + abs(dy) <= rad and 0 <= x < city.size and 0 <= y < city.size:
+        if min_rad <= abs(dx) + abs(dy) <= rad and 0 <= x < city.size and 0 <= y < city.size:
             riders.append({"id": f"rd-{len(riders) + 1}", "name": rng.choice(RIDER_NAMES), "node": (x, y)})
     return riders

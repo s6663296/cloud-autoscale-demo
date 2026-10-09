@@ -10,6 +10,7 @@ class Params:
     alt_routes: int
     alt_penalty: float
     reliability_weight: float
+    rider_min_radius: int = 8  # 外送員離店家至少這麼遠，否則幾秒內就到店
 
     @classmethod
     def from_env(cls) -> "Params":
@@ -21,6 +22,7 @@ class Params:
             alt_routes=int(env("ALT_ROUTES", "3")),
             alt_penalty=float(env("ALT_PENALTY", "1.5")),
             reliability_weight=float(env("RELIABILITY_WEIGHT", "0.5")),
+            rider_min_radius=int(env("RIDER_MIN_RADIUS", "8")),
         )
 
 

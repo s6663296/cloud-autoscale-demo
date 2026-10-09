@@ -159,7 +159,7 @@ def test_riders_within_radius(city):
     rx, ry = city.restaurants[0]["node"]
     for rider in plan.riders:
         x, y = rider["node"]
-        assert abs(x - rx) + abs(y - ry) <= PARAMS.rider_radius
+        assert PARAMS.rider_min_radius <= abs(x - rx) + abs(y - ry) <= PARAMS.rider_radius
         assert 0 <= x < city.size and 0 <= y < city.size
 
 
