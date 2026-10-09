@@ -317,7 +317,7 @@ body[data-screen="tracking"] .screens { max-width: 1040px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .rider-card { display: flex; align-items: center; gap: 12px; padding: 12px 16px 16px; border-top: 1px solid var(--line); }
-.avatar { width: 48px; height: 48px; border-radius: 50%; background: var(--brand); display: grid; place-items: center; font-size: 24px; flex: none; }
+.avatar { width: 48px; height: 48px; border-radius: 50%; display: block; flex: none; overflow: hidden; }
 .rider-card strong { display: block; }
 
 .order-detail { margin-top: 0; }
