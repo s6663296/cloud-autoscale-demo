@@ -1,8 +1,8 @@
 :root {
   color-scheme: light;
-  --brand: #e21b70;
-  --brand-dark: #c2185b;
-  --brand-soft: #fde7f0;
+  --brand: #6c3ce0;
+  --brand-dark: #5527c4;
+  --brand-soft: #efe9fd;
   --bg: #f4f4f5;
   --surface: #ffffff;
   --text: #222222;
@@ -128,7 +128,7 @@ body[data-screen="tracking"] .screens { max-width: 1040px; }
   font-weight: 700;
   font-size: 16px;
 }
-.primary:disabled { background: #e3b5c8; }
+.primary:disabled { background: #c6b6f3; }
 .wide { width: 100%; }
 
 /* --- 首頁 --- */
@@ -287,7 +287,7 @@ body[data-screen="tracking"] .screens { max-width: 1040px; }
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  border: 2px solid #f3c0d6;
+  border: 2px solid #d4c6fa;
   border-top-color: var(--brand);
   animation: spin 0.8s linear infinite;
   flex: none;
