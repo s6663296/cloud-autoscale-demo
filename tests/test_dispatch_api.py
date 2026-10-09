@@ -19,7 +19,7 @@ def _no_metadata():
 @pytest.fixture()
 def client(monkeypatch):
     monkeypatch.setattr(main, "fetch_metadata_instance_id", _no_metadata)
-    with TestClient(main.create_app(allowed_origin="https://hub.example")) as c:
+    with TestClient(main.create_app(allowed_origin="https://web.example")) as c:
         yield c
 
 
@@ -141,7 +141,7 @@ def _preflight(client, origin):
 
 
 def test_cors_allows_only_configured_origin(client):
-    assert _preflight(client, "https://hub.example").headers.get("access-control-allow-origin") == "https://hub.example"
+    assert _preflight(client, "https://web.example").headers.get("access-control-allow-origin") == "https://web.example"
     assert "access-control-allow-origin" not in _preflight(client, "https://evil.example").headers
 
 

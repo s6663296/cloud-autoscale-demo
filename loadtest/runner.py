@@ -1,4 +1,4 @@
-"""壓力測試執行：開放式負載、每秒回報 hub、probe 容量量測（README 第 7 節）。"""
+"""壓力測試執行：開放式負載、每秒回報 web、probe 容量量測（README 第 7 節）。"""
 
 import asyncio
 import random
@@ -43,18 +43,18 @@ class Session:
     def __init__(
         self,
         targets: dict[str, str],
-        hub_url: str,
+        web_url: str,
         *,
         stop: asyncio.Event,
         out: Callable[[str], None],
         max_inflight: int = MAX_INFLIGHT,
         timeout_s: float = REQUEST_TIMEOUT_S,
         target_transport: httpx.AsyncBaseTransport | None = None,
-        hub_transport: httpx.AsyncBaseTransport | None = None,
+        web_transport: httpx.AsyncBaseTransport | None = None,
         on_complete: Callable[[str, object, str], None] | None = None,
     ):
         self.targets = {name: url.rstrip("/") for name, url in targets.items()}
-        self.hub_url = hub_url.rstrip("/")
+        self.web_url = web_url.rstrip("/")
         self.stop = stop
         self.out = out
         self.max_inflight = max_inflight
@@ -67,16 +67,16 @@ class Session:
         self.rng = random.Random()
         self._tasks: set[asyncio.Task] = set()
         self._reports: set[asyncio.Task] = set()
-        self._transports = (target_transport, hub_transport)
+        self._transports = (target_transport, web_transport)
 
     async def __aenter__(self) -> "Session":
-        target_transport, hub_transport = self._transports
+        target_transport, web_transport = self._transports
         limits = httpx.Limits(max_connections=self.max_inflight, max_keepalive_connections=self.max_inflight)
         self.clients = {
             name: httpx.AsyncClient(limits=limits, timeout=self.timeout_s + 5, transport=target_transport)
             for name in self.targets
         }
-        self.hub = httpx.AsyncClient(timeout=REPORT_TIMEOUT_S, transport=hub_transport)
+        self.web = httpx.AsyncClient(timeout=REPORT_TIMEOUT_S, transport=web_transport)
         self.loop = asyncio.get_running_loop()
         self.start = self.loop.time()
         self._reporter = asyncio.create_task(self._report_loop())
@@ -89,7 +89,7 @@ class Session:
         await asyncio.gather(self._reporter, *self._tasks, return_exceptions=True)
         self._flush()  # 最後一筆回報
         await asyncio.gather(*self._reports, return_exceptions=True)
-        for client in (*self.clients.values(), self.hub):
+        for client in (*self.clients.values(), self.web):
             await client.aclose()
 
     # --- 發送 ---------------------------------------------------------------
@@ -151,10 +151,10 @@ class Session:
 
     async def _post(self, payload: dict) -> None:
         try:
-            res = await self.hub.post(f"{self.hub_url}/api/reports/loadtest", json=payload)
+            res = await self.web.post(f"{self.web_url}/api/reports/loadtest", json=payload)
             res.raise_for_status()
         except httpx.HTTPError as e:
-            self.out(f"警告：回報 hub 失敗（{type(e).__name__}: {e}），壓測繼續")
+            self.out(f"警告：回報 web 失敗（{type(e).__name__}: {e}），壓測繼續")
 
     def total_lines(self) -> list[str]:
         return [
@@ -166,7 +166,7 @@ class Session:
 
 async def run_load(
     targets: dict[str, str],
-    hub_url: str,
+    web_url: str,
     *,
     rate: float,
     ramp: float,
@@ -177,12 +177,12 @@ async def run_load(
     max_inflight: int = MAX_INFLIGHT,
     timeout_s: float = REQUEST_TIMEOUT_S,
     target_transport: httpx.AsyncBaseTransport | None = None,
-    hub_transport: httpx.AsyncBaseTransport | None = None,
+    web_transport: httpx.AsyncBaseTransport | None = None,
 ) -> None:
     """兩個目標以相同速率、相同訂單內容同時施壓。"""
     session = Session(
-        targets, hub_url, stop=stop, out=out, max_inflight=max_inflight, timeout_s=timeout_s,
-        target_transport=target_transport, hub_transport=hub_transport,
+        targets, web_url, stop=stop, out=out, max_inflight=max_inflight, timeout_s=timeout_s,
+        target_transport=target_transport, web_transport=web_transport,
     )
     async with session as s:
         s.rate_fn = lambda elapsed: rate_at(elapsed, rate, ramp) if elapsed < duration else 0.0
@@ -213,7 +213,7 @@ class Stage:
 
 async def run_probe(
     url: str,
-    hub_url: str,
+    web_url: str,
     *,
     name: str = "fixed",
     step_s: float = 15,
@@ -223,7 +223,7 @@ async def run_probe(
     stop: asyncio.Event,
     out: Callable[[str], None] = print,
     target_transport: httpx.AsyncBaseTransport | None = None,
-    hub_transport: httpx.AsyncBaseTransport | None = None,
+    web_transport: httpx.AsyncBaseTransport | None = None,
 ) -> int | None:
     """從 1 rps 起每 step_s 秒加 1 rps；某階段送出的請求失敗率超過 threshold 即停止。
 
@@ -253,8 +253,8 @@ async def run_probe(
 
     # probe 只輸出階段結果；每秒的明細不印，但回報失敗的警告照常顯示
     session = Session(
-        {name: url}, hub_url, stop=stop, out=lambda line: out(line) if line.startswith("警告") else None,
-        target_transport=target_transport, hub_transport=hub_transport, on_complete=on_complete,
+        {name: url}, web_url, stop=stop, out=lambda line: out(line) if line.startswith("警告") else None,
+        target_transport=target_transport, web_transport=web_transport, on_complete=on_complete,
     )
     capacity = None
     async with session as s:

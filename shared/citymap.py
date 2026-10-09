@@ -1,6 +1,6 @@
 """城市路網：格狀路網、封閉路段、主幹道、店家與菜單（README 4.1）。
 
-所有輸出只由 size 與 seed 決定，dispatch 與 hub 產生的結果完全一致。
+所有輸出只由 size 與 seed 決定，dispatch 與 web 產生的結果完全一致。
 """
 
 import hashlib

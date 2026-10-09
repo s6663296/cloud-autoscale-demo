@@ -8,8 +8,8 @@ import pytest
 import uvicorn
 from fastapi.testclient import TestClient
 
-from hub import config
-from hub.main import create_app
+from web import config
+from web.main import create_app
 from shared.citymap import get_city
 
 ORDER_REPORT = {

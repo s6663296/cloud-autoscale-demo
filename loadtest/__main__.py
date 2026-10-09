@@ -25,15 +25,15 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     run = sub.add_parser("run", help="以固定到達速率同時對兩個 dispatch 施壓")
     run.add_argument("--fixed", help="dispatch-fixed 網址")
     run.add_argument("--auto", help="dispatch-auto 網址")
-    run.add_argument("--report-to", required=True, help="hub 網址（每秒回報、取得 /api/map）")
+    run.add_argument("--report-to", required=True, help="web 網址（每秒回報、取得 /api/map）")
     run.add_argument("--rate", type=float, default=60, help="目標速率 rps（預設 60）")
     run.add_argument("--ramp", type=float, default=60, help="由 0 線性加壓到 --rate 的秒數（預設 60）")
     run.add_argument("--duration", type=float, required=True, help="總秒數（含加壓）")
 
     probe = sub.add_parser("probe", help="逐步加壓，量測單一 instance 的容量 C")
     probe.add_argument("--target", required=True, help="要量測的 dispatch 網址")
-    probe.add_argument("--report-to", required=True, help="hub 網址")
-    probe.add_argument("--as", dest="name", choices=["fixed", "auto"], default="fixed", help="回報 hub 時的目標名稱")
+    probe.add_argument("--report-to", required=True, help="web 網址")
+    probe.add_argument("--as", dest="name", choices=["fixed", "auto"], default="fixed", help="回報 web 時的目標名稱")
     probe.add_argument("--step", type=float, default=15, help="每階段秒數（預設 15）")
     probe.add_argument("--threshold", type=float, default=0.05, help="失敗率門檻（預設 0.05）")
     probe.add_argument("--max-rate", type=int, default=50, help="速率上限（預設 50）")
@@ -44,8 +44,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     return args
 
 
-def fetch_map(hub_url: str) -> dict:
-    res = httpx.get(f"{hub_url.rstrip('/')}/api/map", timeout=10)
+def fetch_map(web_url: str) -> dict:
+    res = httpx.get(f"{web_url.rstrip('/')}/api/map", timeout=10)
     res.raise_for_status()
     return res.json()
 
@@ -93,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         map_json = fetch_map(args.report_to)
     except httpx.HTTPError as e:
-        print(f"無法從 hub 取得 /api/map：{e}", file=sys.stderr)
+        print(f"無法從 web 取得 /api/map：{e}", file=sys.stderr)
         return 1
     try:
         return asyncio.run(_main(args, map_json))

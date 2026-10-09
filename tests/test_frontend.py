@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-STATIC = ROOT / "hub" / "static"
+STATIC = ROOT / "web" / "static"
 
 
 def test_static_has_no_external_resources():

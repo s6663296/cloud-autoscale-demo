@@ -2,7 +2,7 @@ import random
 
 import pytest
 
-from hub.metrics import Metrics, percentile
+from web.metrics import Metrics, percentile
 
 T0 = 1_760_000_000
 
@@ -79,7 +79,7 @@ def test_rps_combines_students_and_loadtest(metrics, clock):
     assert metrics.snapshot(clock.t)["targets"]["auto"]["rps"] == pytest.approx(2.0)
 
 
-def test_bucketed_by_hub_receive_time(metrics, clock):
+def test_bucketed_by_web_receive_time(metrics, clock):
     metrics.record_loadtest(_lt(fixed={"ok": 1, "latency_samples_ms": [1]}))
     clock.t = T0 + 30
     metrics.record_loadtest(_lt(fixed={"ok": 1, "latency_samples_ms": [1]}))

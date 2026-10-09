@@ -1,5 +1,5 @@
 // 點餐流程：首頁 → 店家 → 結帳 → 追蹤。
-// 下單時平行呼叫兩個派單服務，各自逾時；兩邊結束後回報 hub，才允許再點一單。
+// 下單時平行呼叫兩個派單服務，各自逾時；兩邊結束後回報 web，才允許再點一單。
 
 import { initDashboard } from "./dashboard.js";
 import {
@@ -366,7 +366,7 @@ async function placeOrder() {
       body: JSON.stringify(reportBody(orderId, results)),
     });
   } catch (err) {
-    console.warn("回報 hub 失敗", err);
+    console.warn("回報 web 失敗", err);
   }
 
   state.busy = false;

@@ -210,7 +210,7 @@ def test_send_order_timeout_counts_15000():
 # --- 整合：Session / run_load / probe（MockTransport）-----------------------
 
 
-class Hub:
+class Web:
     def __init__(self, fail=False):
         self.reports = []
         self.fail = fail
@@ -225,7 +225,7 @@ class Hub:
         return sum(r["targets"].get(target, {}).get(outcome, 0) for r in self.reports)
 
 
-def _run_load(hub, target_handler, *, duration, rate=20, stop_after=None, max_inflight=2000):
+def _run_load(web, target_handler, *, duration, rate=20, stop_after=None, max_inflight=2000):
     lines = []
 
     async def go():
@@ -233,10 +233,10 @@ def _run_load(hub, target_handler, *, duration, rate=20, stop_after=None, max_in
         if stop_after is not None:
             asyncio.get_running_loop().call_later(stop_after, stop.set)
         await run_load(
-            {"fixed": "http://fixed", "auto": "http://auto"}, "http://hub",
+            {"fixed": "http://fixed", "auto": "http://auto"}, "http://web",
             rate=rate, ramp=0, duration=duration, orders=OrderFactory(MAP, random.Random(0)), stop=stop,
             out=lines.append, target_transport=httpx.MockTransport(target_handler),
-            hub_transport=httpx.MockTransport(hub.handler), max_inflight=max_inflight,
+            web_transport=httpx.MockTransport(web.handler), max_inflight=max_inflight,
         )
 
     asyncio.run(go())
@@ -244,49 +244,49 @@ def _run_load(hub, target_handler, *, duration, rate=20, stop_after=None, max_in
 
 
 def test_run_load_reports_every_second():
-    hub = Hub()
-    lines = _run_load(hub, _ok, duration=2.5, rate=20)
-    assert abs(hub.total("fixed", "ok") - 50) <= 2
-    assert hub.total("auto", "ok") == hub.total("fixed", "ok")
-    assert len(hub.reports) >= 3
+    web = Web()
+    lines = _run_load(web, _ok, duration=2.5, rate=20)
+    assert abs(web.total("fixed", "ok") - 50) <= 2
+    assert web.total("auto", "ok") == web.total("fixed", "ok")
+    assert len(web.reports) >= 3
     assert any("fixed" in line and "auto" in line for line in lines)
 
 
 def test_stop_sends_final_report_and_returns():
-    hub = Hub()
+    web = Web()
 
     async def slowish(request):
         await asyncio.sleep(0.05)
         return httpx.Response(200, json={"instance_id": "x"})
 
-    lines = _run_load(hub, slowish, duration=30, rate=20, stop_after=1.3)
+    lines = _run_load(web, slowish, duration=30, rate=20, stop_after=1.3)
     sent = sum(int(line.split("送出 ")[1].split()[0]) for line in lines if "fixed 送出" in line)
-    assert 20 <= hub.total("fixed", "ok") <= sent
-    assert hub.reports, "final report missing"
+    assert 20 <= web.total("fixed", "ok") <= sent
+    assert web.reports, "final report missing"
 
 
-def test_hub_report_failure_only_warns():
-    hub = Hub(fail=True)
-    lines = _run_load(hub, _ok, duration=1.5, rate=10)
+def test_web_report_failure_only_warns():
+    web = Web(fail=True)
+    lines = _run_load(web, _ok, duration=1.5, rate=10)
     assert any("警告" in line for line in lines)
     assert any("fixed 送出" in line for line in lines)
 
 
 def test_dropped_when_inflight_limit_reached():
-    hub = Hub()
+    web = Web()
 
     async def hang(request):
         await asyncio.sleep(5)
         return httpx.Response(200, json={})
 
-    lines = _run_load(hub, hang, duration=1.2, rate=20, stop_after=1.3, max_inflight=3)
+    lines = _run_load(web, hang, duration=1.2, rate=20, stop_after=1.3, max_inflight=3)
     dropped = sum(int(line.split("丟棄 ")[1].split()[0]) for line in lines if "fixed 送出" in line)
     assert dropped >= 15
 
 
 def test_probe_finds_capacity():
     """模擬容量約 3.5 rps 的服務：最近 2 秒超過 7 筆就回 429。"""
-    hub = Hub()
+    web = Web()
     lines = []
     recent = []
 
@@ -299,12 +299,12 @@ def test_probe_finds_capacity():
 
     async def go():
         return await run_probe(
-            "http://fixed", "http://hub", name="fixed", step_s=1.5, threshold=0.05, max_rate=10,
+            "http://fixed", "http://web", name="fixed", step_s=1.5, threshold=0.05, max_rate=10,
             orders=OrderFactory(MAP, random.Random(0), seed=7), stop=asyncio.Event(), out=lines.append,
-            target_transport=httpx.MockTransport(limited), hub_transport=httpx.MockTransport(hub.handler),
+            target_transport=httpx.MockTransport(limited), web_transport=httpx.MockTransport(web.handler),
         )
 
     capacity = asyncio.run(go())
     assert capacity == 3, lines
     assert any("容量" in line for line in lines)
-    assert hub.total("fixed", "ok") > 0
+    assert web.total("fixed", "ok") > 0

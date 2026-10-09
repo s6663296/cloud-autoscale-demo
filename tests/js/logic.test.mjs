@@ -13,7 +13,7 @@ import {
   riderPosition,
   roadPaths,
   simSeconds,
-} from "../../hub/static/logic.js";
+} from "../../web/static/logic.js";
 
 // --- 外送員位置 ------------------------------------------------------------
 
@@ -140,7 +140,7 @@ test("formatPct 與 formatMs", () => {
 
 // --- 購物車 ----------------------------------------------------------------
 
-import { cartLines, cartSummary, decorations, etaText, trackingProgress } from "../../hub/static/logic.js";
+import { cartLines, cartSummary, decorations, etaText, trackingProgress } from "../../web/static/logic.js";
 
 const MENU = [
   { id: "r1-m1", name: "紅燒牛肉麵", price: 180 },

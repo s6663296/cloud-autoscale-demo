@@ -1,4 +1,4 @@
-"""hub：前端、地圖與設定、回報收集、SSE 指標推送（README 5.2）。
+"""web：前端、地圖與設定、回報收集、SSE 指標推送（README 5.2）。
 
 指標只存在記憶體，必須以單一 process 執行。
 """
@@ -16,8 +16,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from hub import config
-from hub.metrics import Metrics
+from web import config
+from web.metrics import Metrics
 from shared.citymap import get_city
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -109,7 +109,7 @@ def create_app() -> FastAPI:
         yield
         task.cancel()
 
-    app = FastAPI(title="hub", lifespan=lifespan)
+    app = FastAPI(title="web", lifespan=lifespan)
     app.state.metrics = metrics
     app.state.broadcaster = broadcaster
 
