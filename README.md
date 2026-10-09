@@ -340,15 +340,73 @@ loadtest/    壓力測試 CLI
 tests/       pytest
 deploy.sh    部署腳本
 Dockerfile   共用映像檔
-run_local.bat     Windows 本機一鍵啟動三個服務
+run_local.bat     Windows 本機一鍵啟動三個服務（自動建立虛擬環境）
 run_loadtest.bat  Windows 互動式壓力測試
 ```
 
-## 10. 本機開發
+## 10. 本機測試
 
-需求：Python 3.10 以上（容器映像檔使用 3.12）。
+不需要 GCP 帳號與 Docker，在一台 Windows 電腦上就能跑完整的展示：固定版以 1 個程序代表「固定 1 台」，擴展版以 8 個 worker 代表「已擴展到上限 8 台」。本機無法展示「從 1 台逐步擴展」的過程，那部分要部署到 Cloud Run 才看得到。
 
-本機直接以 uvicorn 啟動，不需要 Docker；`APP` 只供容器判斷要啟動哪個服務。
+### 10.1 啟動
+
+需求：Windows、Python 3.10 以上（安裝時勾選加入 PATH，或使用 `py` 啟動器）。
+
+1. 雙擊專案根目錄的 `run_local.bat`。
+2. 第一次執行會自動建立 `.venv` 並安裝 `requirements.txt`，約需一兩分鐘；之後只有 `requirements.txt` 變動時才會重新安裝。
+3. 接著開啟三個視窗，約 4 秒後瀏覽器自動開啟 <http://localhost:8000>：
+
+| 視窗 | 網址 | 角色 |
+|---|---|---|
+| `dispatch-fixed :8001` | <http://localhost:8001> | 固定容量版（1 個程序） |
+| `dispatch-auto :8002` | <http://localhost:8002> | 自動擴展版（8 個 worker） |
+| `web :8000` | <http://localhost:8000> | 點餐頁、Debug 儀表板 |
+
+停止：關閉三個視窗，或在各視窗按 Ctrl+C。
+
+修改程式後必須關閉三個視窗、重新執行 `run_local.bat` 才會套用；只改 `web/static/` 的前端檔案時，在瀏覽器按 Ctrl+Shift+R 強制重新整理即可。
+
+服務只監聽 `localhost`，同一個區網的手機無法連入；要用手機展示請部署到 Cloud Run（第 8 節）。
+
+### 10.2 使用方式
+
+**一般時段（不開壓測）**
+
+1. 在點餐頁選一家餐廳，加入餐點後按「查看購物車」。
+2. 結帳頁的資料全部選填；地址留空時系統會隨機指定位置。按「下訂單」。
+3. 追蹤頁左右兩欄分別是固定容量版與自動擴展版，各自顯示地圖、外送員位置、預估外送時間與進度。此時兩邊都應在一秒內完成派單。
+4. 按右上角的「Debug」展開儀表板，可看到兩個版本的個體數、RPS、每秒成功率、p50 / p95 延遲與失敗分類（第 6 節）；「趨勢圖」可展開最近 10 分鐘的變化。
+
+**尖峰時段（開壓測）**
+
+1. 保持三個服務執行中，雙擊 `run_loadtest.bat`（需先執行過 `run_local.bat` 建好 `.venv`）。
+2. 目標環境選 `1`（本機），模式選 `1`（壓測），速率直接按 Enter 使用預設值（每秒 8 位新顧客、加壓 20 秒、持續 120 秒），確認後開始。終端機每秒印出兩個版本的請求、成功、失敗與 p95。
+3. 壓測進行中回到點餐頁再下一單，並打開 Debug 儀表板觀察：
+
+| | 固定容量版 | 自動擴展版 |
+|---|---|---|
+| 個體數 | 1 | 最多 8（每個 worker 是一個 `instance_id`） |
+| 每秒成功率 | 逐漸下降，派單與追蹤開始逾時 | 維持接近 100% |
+| p95 延遲 | 升到 10 秒（逾時上限） | 遠低於固定版 |
+| 追蹤頁 | 持續等待，最後顯示「逾時：超過 10 秒沒有回應」，或「位置更新延遲」 | 正常派單，外送員持續移動 |
+
+4. 壓測持續時間結束後不再產生新顧客，終端機會等進行中的配送送達後印出總計；要提前結束按 Ctrl+C（再按一次強制結束）。
+
+想更快看到固定版過載，可以把每秒新顧客數調高；若連擴展版也出現大量逾時，代表已超過這台電腦的運算能力，請調低。
+
+### 10.3 疑難排解
+
+| 狀況 | 原因與處理 |
+|---|---|
+| `run_local.bat` 顯示找不到 Python 3.10 | 安裝 Python 3.10 以上並加入 PATH，或安裝 `py` 啟動器後重試 |
+| `Setup failed` | 依上方的錯誤訊息處理（常見為網路無法下載套件）；修正後重新執行即可 |
+| 視窗一開就關閉或顯示 port 被占用 | 前一次的服務還在執行，關閉舊視窗後再啟動 |
+| 追蹤頁顯示「錯誤：無法連線」 | 對應的 dispatch 視窗已關閉或當機，重新執行 `run_local.bat` |
+| 改了程式但畫面或行為沒變 | 前端按 Ctrl+Shift+R；後端要重開三個服務 |
+
+### 10.4 開發與手動啟動
+
+本機直接以 uvicorn 啟動，不需要 Docker；`APP` 只供容器判斷要啟動哪個服務。容器映像檔使用 Python 3.12，本機程式碼需維持與 3.10 相容。
 
 ```bash
 python -m venv .venv
@@ -356,14 +414,12 @@ python -m venv .venv
 .venv/Scripts/python -m pytest
 ```
 
-bash：
+bash（只啟動一個 dispatch，固定版與擴展版共用）：
 
 ```bash
 ALLOWED_ORIGIN=http://localhost:8000,http://127.0.0.1:8000 .venv/Scripts/python -m uvicorn dispatch.main:app --port 8001
 FIXED_URL=http://localhost:8001 AUTO_URL=http://localhost:8001 .venv/Scripts/python -m uvicorn web.main:app --port 8000
 ```
-
-Windows 最簡單的方式：雙擊專案根目錄的 `run_local.bat`，會開三個視窗（固定版 8001、擴展版 8002 以 8 個 worker 模擬擴展到上限、web 8000）並開啟瀏覽器。第一次執行時若沒有 `.venv`，會自動以 Python 3.10 以上版本建立並安裝 `requirements.txt`；之後 `requirements.txt` 有變動時也會自動重新安裝。
 
 Windows cmd 手動啟動（兩個視窗各執行一組）：
 
@@ -385,6 +441,8 @@ $env:ALLOWED_ORIGIN = "http://localhost:8000,http://127.0.0.1:8000"
 $env:FIXED_URL = "http://localhost:8001"; $env:AUTO_URL = "http://localhost:8001"
 .venv\Scripts\python -m uvicorn web.main:app --port 8000
 ```
+
+Windows 上單一程序的 uvicorn 請加上 `--loop asyncio:SelectorEventLoop`（`run_local.bat` 已加上）：預設的 ProactorEventLoop 在 Python 3.10 遇到一次連線接受失敗就會關閉監聽，壓測後服務仍在執行卻不再接受連線。
 
 ## 11. 已知限制
 
