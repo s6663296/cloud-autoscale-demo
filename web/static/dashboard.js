@@ -86,7 +86,7 @@ function renderStats(dl, t) {
   const rows = [
     ["個體數", String(t.instances)],
     ["RPS", t.rps.toFixed(t.rps < 1 ? 2 : 1)],
-    ["成功率", formatPct(t.success_rate)],
+    ["每秒成功率", formatPct(t.success_rate)],
     ["p50", formatMs(t.p50_ms)],
     ["p95", formatMs(t.p95_ms)],
     ["逾時/忙/錯", `${f.timeout}/${f.busy}/${f.error}`, "small"],

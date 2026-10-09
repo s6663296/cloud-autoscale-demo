@@ -16,6 +16,7 @@ OUTCOMES = ("ok", "timeout", "busy", "error")
 HISTORY_S = 600
 WINDOW_S = 60
 INSTANCE_WINDOW_S = 10
+RATE_LOOKBACK_S = 10
 SERIES_STEP_S = 10
 MAX_SAMPLES = 200
 TIMEOUT_LATENCY_MS = 10000
@@ -149,7 +150,7 @@ class Metrics:
             targets[target] = {
                 "instances": len(set().union(*(s.instances[target] for s in recent))),
                 "rps": completed / WINDOW_S,
-                "success_rate": counts["ok"] / completed if completed else None,
+                "success_rate": self._latest_success_rate(target, now_sec),
                 "p50_ms": percentile(samples, 50) if completed else None,
                 "p95_ms": percentile(samples, 95) if completed else None,
                 "failures": {o: counts[o] for o in ("timeout", "busy", "error")},
@@ -161,6 +162,19 @@ class Metrics:
             "auto_ok": sum(s.student_ok["auto"] for s in window),
         }
         return {"now": now_sec, "targets": targets, "students": students, "series": self._series(now_sec)}
+
+    def _latest_success_rate(self, target: str, now_sec: int) -> float | None:
+        """最近一個已結束、且有完成請求的那一秒的成功率。
+
+        用 60 秒視窗的話，服務掛掉後還會被前面成功的請求撐住好一陣子，看起來像沒事。
+        目前這一秒還在寫入，不採用；流量低時往回找最多 RATE_LOOKBACK_S 秒。
+        """
+        for sec in range(now_sec - 1, now_sec - 1 - RATE_LOOKBACK_S, -1):
+            counts, _ = self._collect(self._slots_between(sec, sec + 1), target)
+            completed = sum(counts.values())
+            if completed:
+                return counts["ok"] / completed
+        return None
 
     def _series(self, now_sec: int) -> list[dict]:
         """已結束的區間不會再寫入（寫入一律落在目前時間），計算一次後快取。

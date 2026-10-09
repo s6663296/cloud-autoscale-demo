@@ -62,7 +62,6 @@ def test_snapshot_percentiles(metrics, clock):
 def test_data_older_than_60s_excluded(metrics, clock):
     metrics.record_loadtest(_lt(fixed={"ok": 6, "timeout": 2, "latency_samples_ms": [100] * 8}))
     in_window = metrics.snapshot(T0 + 59)["targets"]["fixed"]
-    assert in_window["success_rate"] == 0.75
     assert in_window["rps"] == pytest.approx(8 / 60)
     assert in_window["failures"] == {"timeout": 2, "busy": 0, "error": 0}
 
@@ -91,9 +90,26 @@ def test_ring_slot_reused_after_600s(metrics, clock):
     metrics.record_loadtest(_lt(fixed={"error": 5}))
     clock.t = T0 + 600
     metrics.record_loadtest(_lt(fixed={"ok": 1, "latency_samples_ms": [9]}))
-    snap = metrics.snapshot(clock.t)["targets"]["fixed"]
+    snap = metrics.snapshot(clock.t + 1)["targets"]["fixed"]
     assert snap["failures"]["error"] == 0
     assert snap["success_rate"] == 1.0
+
+
+# --- 每秒成功率 -------------------------------------------------------------
+
+
+def test_success_rate_uses_last_completed_second(metrics, clock):
+    metrics.record_loadtest(_lt(fixed={"ok": 30, "latency_samples_ms": [10]}))
+    clock.t = T0 + 1
+    metrics.record_loadtest(_lt(fixed={"ok": 1, "timeout": 3, "latency_samples_ms": [10]}))
+    assert metrics.snapshot(T0 + 1)["targets"]["fixed"]["success_rate"] == 1.0  # 目前這一秒還沒結束
+    assert metrics.snapshot(T0 + 2)["targets"]["fixed"]["success_rate"] == 0.25
+
+
+def test_success_rate_looks_back_over_quiet_seconds(metrics, clock):
+    metrics.record_loadtest(_lt(fixed={"ok": 3, "error": 1, "latency_samples_ms": [10]}))
+    assert metrics.snapshot(T0 + 10)["targets"]["fixed"]["success_rate"] == 0.75
+    assert metrics.snapshot(T0 + 11)["targets"]["fixed"]["success_rate"] is None
 
 
 # --- 活躍執行個體 -----------------------------------------------------------
