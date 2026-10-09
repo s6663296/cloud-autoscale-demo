@@ -275,10 +275,16 @@ flowchart LR
 
 ## 7. 壓力測試工具
 
+Windows 可直接雙擊 `run_loadtest.bat`，或不帶參數執行 `python -m loadtest` 進入互動模式：依序選擇目標環境（本機或雲端）、模式（壓測或量測容量）與速率，確認後開始。本機的 web 固定為 `http://localhost:8000`；雲端第一次使用時貼上 web 網址，會記在專案根目錄的 `.loadtest.json`（不進 git），之後直接沿用。
+
+非互動模式（固定版與擴展版的網址預設取自 web 的 `/api/config`，也可用 `--fixed`、`--auto`、`--target` 指定）：
+
 ```bash
-python -m loadtest run --fixed <URL> --auto <URL> --report-to <WEB_URL> --rate 60 --ramp 60 --duration 300
-python -m loadtest probe --target <URL> --report-to <WEB_URL>
+python -m loadtest run --report-to <WEB_URL> --rate 60 --ramp 60 --duration 300
+python -m loadtest probe --report-to <WEB_URL>
 ```
+
+互動模式的預設速率：本機每秒 8 位新顧客、加壓 20 秒、持續 120 秒（本機固定版只有 1 個程序，擴展版以 4 個 worker 模擬擴展，此速率會讓固定版過載而擴展版撐得住）；雲端沿用上方預設，P8 校準後更新。
 
 - **模擬顧客**：每位模擬顧客下單成功後，每隔 `track_interval_ms`（取自 web 的 `/api/config`）追蹤一次，直到送達；與觀眾手機的行為相同。
 - **開放式負載**：新顧客依固定到達速率出現，不等待先前顧客完成，模擬顧客持續下單。封閉式負載會因目標變慢而自動降速，掩蓋固定容量版的瓶頸，故不採用。同一位顧客的追蹤請求一次只有一個，回應後才排定下一次。
@@ -333,7 +339,8 @@ loadtest/    壓力測試 CLI
 tests/       pytest
 deploy.sh    部署腳本
 Dockerfile   共用映像檔
-run_local.bat  Windows 本機一鍵啟動
+run_local.bat     Windows 本機一鍵啟動三個服務
+run_loadtest.bat  Windows 互動式壓力測試
 ```
 
 ## 10. 本機開發
