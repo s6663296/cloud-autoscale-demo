@@ -61,7 +61,7 @@ def test_cloud_uses_saved_url_and_cloud_defaults():
     p = Prompts(["2", "", "", "", "", "", ""], saved="https://saved.run.app")
     plan = p.plan()
     assert plan.report_to == "https://saved.run.app"
-    assert (plan.rate, plan.ramp, plan.duration) == (60, 60, 300)
+    assert (plan.rate, plan.ramp, plan.duration) == (15, 10, 600)
 
 
 def test_cloud_not_deployed_yet():

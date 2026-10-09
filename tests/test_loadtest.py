@@ -2,6 +2,7 @@ import asyncio
 import json
 import pickle
 import random
+import ssl
 
 import httpx
 import pytest
@@ -210,6 +211,36 @@ def test_send_request_timeout_counts_10000():
 
     r = asyncio.run(go())
     assert (r.outcome, r.latency_ms, r.instance_id) == ("timeout", 10000, None)
+
+
+def test_send_request_timeout_does_not_cancel_request():
+    # HTTP/2 共用 TLS 連線，請求寫到一半被取消會弄壞整條連線，所以逾時後請求要在背景跑完
+    finished = []
+
+    async def slow(request):
+        await asyncio.sleep(0.1)
+        finished.append(request.url.path)
+        return httpx.Response(200, json={})
+
+    async def go():
+        async with _client(slow) as c:
+            r = await send_request(c, "http://t", "/api/orders", {}, timeout_s=0.02)
+            await asyncio.sleep(0.2)
+            return r
+
+    assert asyncio.run(go()).outcome == "timeout"
+    assert finished == ["/api/orders"]
+
+
+def test_send_request_ssl_error_counts_as_error():
+    def handler(request):
+        raise ssl.SSLError(1, "[SSL: SSLV3_ALERT_BAD_RECORD_MAC] sslv3 alert bad record mac")
+
+    async def go():
+        async with _client(handler) as c:
+            return await send_request(c, "http://t", "/api/track", {}, timeout_s=1)
+
+    assert asyncio.run(go()).outcome == "error"
 
 
 # --- 整合：模擬顧客（MockTransport）----------------------------------------

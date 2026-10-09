@@ -25,7 +25,7 @@ PROBE_SEED = 20261008
 LOCAL_WEB = "http://localhost:8000"
 SAVED_FILE = Path(__file__).resolve().parent.parent / ".loadtest.json"
 # 本機固定版只有 1 個程序、擴展版 8 個 worker：每秒 8 位新顧客會讓固定版過載、擴展版撐得住
-DEFAULTS = {"local": (8, 20, 120), "cloud": (60, 60, 300)}
+DEFAULTS = {"local": (8, 20, 120), "cloud": (15, 10, 600)}
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:

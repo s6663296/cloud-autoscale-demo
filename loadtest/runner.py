@@ -26,6 +26,15 @@ POOL_SHARDS = 8
 HTTP2 = importlib.util.find_spec("h2") is not None
 
 
+_background: set[asyncio.Task] = set()  # 已逾時、仍在背景跑完的請求；保留參照避免被回收
+
+
+def _finish_background(task: asyncio.Task) -> None:
+    _background.discard(task)
+    if not task.cancelled():
+        task.exception()  # 取出例外，避免 asyncio 印出 "Task exception was never retrieved"
+
+
 @dataclass
 class Result:
     outcome: str
@@ -37,13 +46,24 @@ class Result:
 async def send_request(
     client: httpx.AsyncClient, url: str, path: str, body: dict, timeout_s: float = REQUEST_TIMEOUT_S
 ) -> Result:
-    """送出一個請求並依 README 分類，方式與手機端一致。"""
+    """送出一個請求並依 README 分類，方式與手機端一致。
+
+    逾時不取消請求：HTTP/2 的多個請求共用一條 TLS 連線，寫到一半被取消會讓整條連線的加密資料錯亂
+    （SSLV3_ALERT_BAD_RECORD_MAC），連帶弄壞同一條連線上的其他請求。所以逾時先記為 timeout，
+    請求留在背景跑完（由 httpx 自己的逾時或伺服器的逾時收尾）。
+    """
     start = time.perf_counter()
-    try:
-        res = await asyncio.wait_for(client.post(f"{url}{path}", json=body), timeout_s)
-    except (asyncio.TimeoutError, httpx.TimeoutException):
+    task = asyncio.ensure_future(client.post(f"{url}{path}", json=body))
+    _background.add(task)
+    task.add_done_callback(_finish_background)
+    done, _ = await asyncio.wait({task}, timeout=timeout_s)
+    if not done:
         return Result("timeout", TIMEOUT_LATENCY_MS)
-    except httpx.HTTPError:
+    try:
+        res = task.result()
+    except httpx.TimeoutException:
+        return Result("timeout", TIMEOUT_LATENCY_MS)
+    except (httpx.HTTPError, OSError):  # OSError 包含 httpx 未包裝的 ssl.SSLError
         return Result("error", (time.perf_counter() - start) * 1000)
     latency = (time.perf_counter() - start) * 1000
     if res.status_code == 200:
