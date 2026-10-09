@@ -60,6 +60,8 @@ async function getJSON(url) {
 // --- 畫面切換（支援手機返回鍵）-------------------------------------------
 
 function show(name, { push = true } = {}) {
+  // 離開追蹤頁（再點一單或按返回）就放棄原本的訂單，不再追蹤，避免現場連續下單讓追蹤請求越積越多
+  if (state.screen === "tracking" && name !== "tracking") stopTracks();
   state.screen = name;
   document.body.dataset.screen = name;
   for (const screen of document.querySelectorAll(".screen")) screen.hidden = screen.id !== `screen-${name}`;
@@ -203,10 +205,11 @@ function renderCheckout() {
 
 // --- 呼叫派單服務 ----------------------------------------------------------
 
-async function postJSON(base, path, body, timeoutMs) {
+async function postJSON(base, path, body, timeoutMs, cancel) {
   if (!base) return { outcome: "error", detail: "未設定服務網址", latencyMs: 0, instanceId: null };
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  cancel?.addEventListener("abort", () => ctrl.abort());
   const start = performance.now();
   try {
     const res = await fetch(`${base.replace(/\/$/, "")}${path}`, {
@@ -237,6 +240,7 @@ async function postJSON(base, path, body, timeoutMs) {
 function stopTracks() {
   for (const t of Object.values(state.tracks)) {
     t.stopped = true;
+    t.cancel.abort(); // 中斷還在等回應的追蹤請求
     t.view.destroy();
   }
 }
@@ -265,6 +269,7 @@ function createTracks() {
       target,
       result: null,
       stopped: false,
+      cancel: new AbortController(),
     };
     track.view = new CityMapView(node.querySelector(".map"), state.map);
     state.tracks[target] = track;
@@ -327,7 +332,9 @@ async function trackLoop(track, base, orderId) {
   while (!track.stopped) {
     await sleep(interval);
     if (track.stopped) return;
-    const r = await postJSON(base, "/api/track", { order_id: orderId, tracking }, state.config.timeout_ms);
+    const r = await postJSON(
+      base, "/api/track", { order_id: orderId, tracking }, state.config.timeout_ms, track.cancel.signal,
+    );
     if (track.stopped) return;
     reportTrack(track.target, r);
     if (r.outcome !== "ok") {
@@ -425,7 +432,6 @@ async function placeOrder() {
 }
 
 function orderAgain() {
-  stopTracks();
   state.qty = {};
   state.restaurant = null;
   $("#customer-form").reset();
