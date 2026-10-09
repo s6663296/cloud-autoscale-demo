@@ -1,15 +1,36 @@
-// 點餐頁：選店家與餐點 → 平行呼叫兩個派單服務 → 顯示結果與路線 → 回報 hub。
+// 點餐流程：首頁 → 店家 → 結帳 → 追蹤。
+// 下單時平行呼叫兩個派單服務，各自逾時；兩邊結束後回報 hub，才允許再點一單。
 
 import { initDashboard } from "./dashboard.js";
 import {
-  buildOrderBody, formatMs, makeOrderId, outcomeFromStatus, reportBody, TARGETS,
+  buildOrderBody, cartLines, cartSummary, etaText, formatMs, makeOrderId,
+  outcomeFromStatus, reportBody, TARGETS, trackingProgress,
 } from "./logic.js";
 import { CityMapView } from "./map.js";
 
 const MAX_QTY = 9;
-const FAIL_TEXT = { timeout: "逾時", busy: "服務忙碌", error: "錯誤" };
+const LOOKS = {
+  r1: { emoji: "🍜", category: "牛肉麵・麵食", tint: ["#ffe0b2", "#ffab91"] },
+  r2: { emoji: "🍱", category: "便當・台式", tint: ["#fff3c4", "#ffd180"] },
+  r3: { emoji: "🍗", category: "鹹酥雞・炸物", tint: ["#ffe6d5", "#ffb74d"] },
+  r4: { emoji: "🥪", category: "早午餐", tint: ["#e0f7fa", "#80deea"] },
+  r5: { emoji: "🍝", category: "義式料理", tint: ["#fce4ec", "#f48fb1"] },
+  r6: { emoji: "🧋", category: "飲料・手搖", tint: ["#efebe9", "#bcaaa4"] },
+};
+const DEFAULT_LOOK = { emoji: "🍽️", category: "餐廳", tint: ["#eeeeee", "#cccccc"] };
+const TRACK_INFO = {
+  fixed: { title: "固定容量版", tag: "固定 1 台" },
+  auto: { title: "自動擴展版", tag: "自動擴展" },
+};
+const STEP_TEXT = [
+  "外送夥伴正在前往餐廳取餐",
+  "餐廳正在準備你的餐點",
+  "外送夥伴正在前往你的位置，再等等！",
+  "餐點已送達，祝你用餐愉快！",
+];
 
 const $ = (sel) => document.querySelector(sel);
+const look = (r) => LOOKS[r.id] || DEFAULT_LOOK;
 
 const state = {
   config: null,
@@ -17,8 +38,8 @@ const state = {
   restaurant: null,
   qty: {},
   busy: false,
-  results: {},
-  mapView: null,
+  screen: "home",
+  tracks: {},
 };
 
 function html(tag, text, cls) {
@@ -34,72 +55,150 @@ async function getJSON(url) {
   return res.json();
 }
 
-// --- 店家與菜單 ------------------------------------------------------------
+// --- 畫面切換（支援手機返回鍵）-------------------------------------------
+
+function show(name, { push = true } = {}) {
+  state.screen = name;
+  for (const screen of document.querySelectorAll(".screen")) screen.hidden = screen.id !== `screen-${name}`;
+  $("#back").hidden = name === "home" || (name === "tracking" && state.busy);
+  window.scrollTo(0, 0);
+  if (push) history.pushState({ screen: name }, "");
+}
+
+window.addEventListener("popstate", (e) => {
+  if (state.busy) {
+    // 派單進行中留在追蹤頁
+    history.pushState({ screen: state.screen }, "");
+    return;
+  }
+  const target = e.state?.screen || "home";
+  if ((target === "restaurant" || target === "checkout" || target === "tracking") && !state.restaurant) {
+    show("home", { push: false });
+    return;
+  }
+  if (target === "restaurant") renderMenu();
+  if (target === "checkout") renderCheckout();
+  show(target, { push: false });
+});
+
+// --- 首頁 ------------------------------------------------------------------
 
 function renderRestaurants() {
-  const box = $("#restaurants");
-  box.replaceChildren(...state.map.restaurants.map((r) => {
+  $("#restaurants").replaceChildren(...state.map.restaurants.map((r) => {
+    const l = look(r);
     const preps = r.menu.map((m) => m.prep_min);
-    const btn = html("button", undefined, "restaurant");
-    btn.type = "button";
-    btn.setAttribute("role", "radio");
-    btn.setAttribute("aria-checked", "false");
-    btn.dataset.id = r.id;
-    btn.append(html("strong", r.name), html("span", `${r.menu.length} 項 · 備餐 ${Math.min(...preps)}–${Math.max(...preps)} 分`));
-    btn.addEventListener("click", () => selectRestaurant(r));
-    return btn;
+    const card = html("button", undefined, "restaurant-card");
+    card.type = "button";
+    const thumb = html("div", l.emoji, "thumb");
+    thumb.style.background = `linear-gradient(135deg, ${l.tint[0]}, ${l.tint[1]})`;
+    const body = html("div", undefined, "body");
+    body.append(
+      html("strong", r.name),
+      html("div", `${l.category} · 備餐 ${Math.min(...preps)}–${Math.max(...preps)} 分鐘`, "meta"),
+      html("span", "免外送費", "chip"),
+    );
+    card.append(thumb, body);
+    card.addEventListener("click", () => openRestaurant(r));
+    return card;
   }));
 }
 
-function selectRestaurant(r) {
-  if (state.busy) return;
-  state.restaurant = r;
-  state.qty = {};
-  for (const btn of $("#restaurants").children) {
-    btn.setAttribute("aria-checked", String(btn.dataset.id === r.id));
+// --- 店家頁 ----------------------------------------------------------------
+
+function openRestaurant(r) {
+  const current = state.restaurant;
+  if (current && current.id !== r.id) {
+    if (cartSummary(current.menu, state.qty).count > 0
+      && !confirm(`購物車裡有「${current.name}」的餐點，要清空並改點「${r.name}」嗎？`)) return;
+    state.qty = {};
   }
-  $("#menu-title").textContent = `2. ${r.name} 的餐點`;
+  state.restaurant = r;
+  renderMenu();
+  show("restaurant");
+}
+
+function renderMenu() {
+  const r = state.restaurant;
+  const l = look(r);
+  const cover = $("#r-cover");
+  cover.textContent = l.emoji;
+  cover.style.background = `linear-gradient(135deg, ${l.tint[0]}, ${l.tint[1]})`;
+  $("#r-name").textContent = r.name;
+  $("#r-meta").textContent = `${l.category} · 免外送費`;
   $("#menu").replaceChildren(...r.menu.map(menuRow));
-  $("#menu-panel").hidden = false;
-  state.mapView.highlightRestaurant(r.id);
-  updateSubmit();
+  updateCartBar();
 }
 
 function menuRow(item) {
   const li = document.createElement("li");
   const info = html("div");
-  info.append(html("div", item.name, "item-name"), html("div", `NT$ ${item.price} · 備餐 ${item.prep_min} 分`, "item-meta"));
-
-  const stepper = html("div", undefined, "stepper");
-  const minus = html("button", "−");
-  const plus = html("button", "+");
-  const out = html("output", "0");
-  minus.type = plus.type = "button";
-  minus.setAttribute("aria-label", `減少 ${item.name}`);
-  plus.setAttribute("aria-label", `增加 ${item.name}`);
+  info.append(
+    html("div", item.name, "item-name"),
+    html("div", `備餐 ${item.prep_min} 分鐘`, "item-meta"),
+    html("div", `NT$ ${item.price}`, "item-price"),
+  );
+  const control = html("div");
   const set = (n) => {
     state.qty[item.id] = n;
-    out.textContent = String(n);
-    minus.disabled = n <= 0;
-    plus.disabled = n >= MAX_QTY;
-    updateSubmit();
+    render();
+    updateCartBar();
   };
-  minus.addEventListener("click", () => set(Math.max(0, (state.qty[item.id] || 0) - 1)));
-  plus.addEventListener("click", () => set(Math.min(MAX_QTY, (state.qty[item.id] || 0) + 1)));
-  set(0);
-  stepper.append(minus, out, plus);
-  li.append(info, stepper);
+  const render = () => {
+    const n = state.qty[item.id] || 0;
+    if (n === 0) {
+      const add = html("button", "+", "add-btn");
+      add.type = "button";
+      add.setAttribute("aria-label", `加入 ${item.name}`);
+      add.addEventListener("click", () => set(1));
+      control.replaceChildren(add);
+      return;
+    }
+    const stepper = html("div", undefined, "stepper");
+    const minus = html("button", "−", "minus");
+    const plus = html("button", "+");
+    minus.type = plus.type = "button";
+    minus.setAttribute("aria-label", `減少 ${item.name}`);
+    plus.setAttribute("aria-label", `增加 ${item.name}`);
+    plus.disabled = n >= MAX_QTY;
+    minus.addEventListener("click", () => set(n - 1));
+    plus.addEventListener("click", () => set(Math.min(MAX_QTY, n + 1)));
+    stepper.append(minus, html("output", String(n)), plus);
+    control.replaceChildren(stepper);
+  };
+  render();
+  li.append(info, control);
   return li;
 }
 
-function updateSubmit() {
-  const r = state.restaurant;
-  const total = r ? r.menu.reduce((sum, m) => sum + m.price * (state.qty[m.id] || 0), 0) : 0;
-  $("#total").textContent = `NT$ ${total}`;
-  $("#submit").disabled = state.busy || total === 0;
+function updateCartBar() {
+  const { count, total } = cartSummary(state.restaurant.menu, state.qty);
+  $("#cart-bar").hidden = count === 0;
+  $("#cart-count").textContent = String(count);
+  $("#cart-total").textContent = `NT$ ${total}`;
 }
 
-// --- 下單 ------------------------------------------------------------------
+// --- 結帳 ------------------------------------------------------------------
+
+function fillLines(list, lines) {
+  list.replaceChildren(...lines.map((l) => {
+    const li = document.createElement("li");
+    li.append(html("span", `${l.qty}x`, "qty"), html("span", l.name), html("span", `NT$ ${l.subtotal}`));
+    return li;
+  }));
+}
+
+function renderCheckout() {
+  const r = state.restaurant;
+  const { total } = cartSummary(r.menu, state.qty);
+  $("#co-restaurant").textContent = r.name;
+  fillLines($("#co-lines"), cartLines(r.menu, state.qty));
+  $("#co-total").textContent = `NT$ ${total}`;
+  const btn = $("#place-order");
+  btn.textContent = `下訂單 · NT$ ${total}`;
+  btn.disabled = state.busy || total === 0;
+}
+
+// --- 呼叫派單服務 ----------------------------------------------------------
 
 async function callTarget(url, body, timeoutMs) {
   if (!url) return { outcome: "error", detail: "未設定服務網址", latencyMs: 0, instanceId: null };
@@ -130,122 +229,172 @@ async function callTarget(url, body, timeoutMs) {
   }
 }
 
-function statusBody(target) {
-  return $(`.status-card[data-target="${target}"] .status-body`);
-}
+// --- 追蹤頁：每個版本一個區塊，各有自己的地圖與動畫時鐘 -------------------
 
-function renderWaiting(target) {
-  const row = html("div", undefined, "status-waiting");
-  const text = html("span", "已等待 0.0 秒");
-  row.append(html("span", undefined, "spinner"), text);
-  statusBody(target).replaceChildren(row);
-  return text;
-}
-
-function details(rows) {
-  const dl = document.createElement("dl");
-  for (const [k, v] of rows) dl.append(html("dt", k), html("dd", v));
-  return dl;
-}
-
-function renderResult(target, r) {
-  const body = statusBody(target);
-  if (r.outcome === "ok") {
-    const d = r.data;
-    body.replaceChildren(
-      html("div", "✓ 派單成功", "status-headline ok"),
-      details([
-        ["外送員", d.rider.name],
-        ["送達", `約 ${d.eta_minutes} 分鐘`],
-        ["回應", formatMs(r.latencyMs)],
-        ["運算", `${d.compute_ms} ms`],
-        ["執行個體", d.instance_id.length > 12 ? `${d.instance_id.slice(0, 12)}…` : d.instance_id],
-      ]),
-    );
-    return;
+function createTracks() {
+  for (const t of Object.values(state.tracks)) t.view.stop();
+  const template = $("#track-template");
+  const box = $("#tracks");
+  box.replaceChildren();
+  state.tracks = {};
+  for (const target of TARGETS) {
+    const node = template.content.firstElementChild.cloneNode(true);
+    node.dataset.target = target;
+    node.querySelector(".swatch").classList.add(`swatch-${target}`);
+    node.querySelector(".track-title").textContent = TRACK_INFO[target].title;
+    node.querySelector(".tag").textContent = TRACK_INFO[target].tag;
+    box.appendChild(node);
+    const track = {
+      node,
+      eta: node.querySelector(".eta"),
+      etaLabel: node.querySelector(".eta-label"),
+      progress: node.querySelector(".progress"),
+      status: node.querySelector(".status-text"),
+      meta: node.querySelector(".status-meta"),
+      rider: node.querySelector(".rider-card"),
+      result: null,
+    };
+    track.view = new CityMapView(node.querySelector(".map"), state.map, {
+      onFrame: (t) => updateProgress(track, t),
+    });
+    state.tracks[target] = track;
   }
-  const reason = r.outcome === "timeout"
-    ? `超過 ${state.config.timeout_ms / 1000} 秒未回應`
-    : r.detail;
-  body.replaceChildren(
-    html("div", `✗ ${FAIL_TEXT[r.outcome]}`, "status-headline fail"),
-    details([["原因", reason], ["等待", formatMs(r.latencyMs)]]),
-  );
 }
 
-function setMapSwitch(target, enabled, pressed) {
-  const btn = document.querySelector(`.map-switch button[data-target="${target}"]`);
-  btn.disabled = !enabled;
-  btn.setAttribute("aria-pressed", String(pressed));
+function setSegments(track, step, frac) {
+  [...track.progress.children].forEach((seg, i) => {
+    const fill = i < step ? 1 : i === step ? frac : 0;
+    seg.style.setProperty("--fill", `${Math.round(fill * 100)}%`);
+  });
 }
 
-function showOnMap(target) {
-  state.shownTarget = target;
-  for (const t of TARGETS) setMapSwitch(t, state.results[t]?.outcome === "ok", t === target);
-  state.mapView.showResult(target, state.results[target].data);
+function setWaiting(track) {
+  track.view.showWaiting(state.restaurant, look(state.restaurant).emoji);
+  track.etaLabel.textContent = "派單中";
+  track.eta.textContent = "正在為你尋找外送夥伴";
+  track.eta.className = "eta small";
+  track.progress.className = "progress searching";
+  setSegments(track, 0, 0);
+  track.waitText = html("span", "已等待 0.0 秒");
+  track.status.replaceChildren(html("span", undefined, "spinner"), track.waitText);
+  track.meta.textContent = "";
+  track.rider.hidden = true;
 }
 
-async function submit() {
+function setSuccess(track, r) {
+  const d = r.data;
+  track.result = d;
+  track.etaLabel.textContent = "預估外送時間";
+  track.eta.className = "eta";
+  track.progress.className = "progress";
+  track.rider.hidden = false;
+  track.rider.querySelector(".rider-name").textContent = d.rider.name;
+  const id = d.instance_id.length > 14 ? `${d.instance_id.slice(0, 14)}…` : d.instance_id;
+  track.meta.textContent = `派單回應 ${formatMs(r.latencyMs)} · 運算 ${d.compute_ms} ms · 執行個體 ${id}`;
+  track.view.showResult(d);
+}
+
+function updateProgress(track, t) {
+  const { schedule } = track.result;
+  const p = trackingProgress(schedule, t);
+  setSegments(track, p.step, p.frac);
+  track.eta.textContent = etaText(schedule.deliver_s, t);
+  track.status.textContent = STEP_TEXT[p.step];
+}
+
+function setFailed(track, r) {
+  track.view.showFailed();
+  track.etaLabel.textContent = "派單結果";
+  track.eta.textContent = "派單失敗";
+  track.eta.className = "eta small fail";
+  track.progress.className = "progress";
+  setSegments(track, 0, 0);
+  track.status.textContent = {
+    timeout: `✗ 逾時：超過 ${state.config.timeout_ms / 1000} 秒沒有回應`,
+    busy: `✗ 服務忙碌（${r.detail}）`,
+    error: `✗ 錯誤：${r.detail}`,
+  }[r.outcome];
+  track.meta.textContent = `等待 ${formatMs(r.latencyMs)}`;
+}
+
+function renderOrderDetail(body) {
+  const r = state.restaurant;
+  $("#od-restaurant").textContent = r.name;
+  $("#od-address").textContent = body.customer.address || "未填寫（系統隨機指定位置）";
+  fillLines($("#od-lines"), cartLines(r.menu, state.qty));
+  $("#od-total").textContent = `NT$ ${cartSummary(r.menu, state.qty).total}`;
+}
+
+async function placeOrder() {
   if (state.busy) return;
+  const r = state.restaurant;
+  if (!r || cartSummary(r.menu, state.qty).count === 0) return;
   state.busy = true;
-  updateSubmit();
-  $("#submit").textContent = "派單中…";
 
   const orderId = makeOrderId();
-  const form = Object.fromEntries(
-    [...document.querySelectorAll(".customer input")].map((input) => [input.name, input.value]),
-  );
-  const body = buildOrderBody({
-    orderId,
-    restaurantId: state.restaurant.id,
-    menu: state.restaurant.menu,
-    qty: state.qty,
-    customer: form,
-  });
+  const form = Object.fromEntries(new FormData($("#customer-form")));
+  const body = buildOrderBody({ orderId, restaurantId: r.id, menu: r.menu, qty: state.qty, customer: form });
 
-  state.results = {};
-  state.shownTarget = null;
-  for (const t of TARGETS) setMapSwitch(t, false, false);
-  state.mapView.clearResult();
-  $("#results").hidden = false;
+  renderOrderDetail(body);
+  const again = $("#again");
+  again.disabled = true;
+  again.textContent = "派單中…";
+  show("tracking");
+  createTracks();
+  for (const t of TARGETS) setWaiting(state.tracks[t]);
 
   const started = performance.now();
-  const waiting = Object.fromEntries(TARGETS.map((t) => [t, renderWaiting(t)]));
+  const results = {};
   const ticker = setInterval(() => {
     const secs = ((performance.now() - started) / 1000).toFixed(1);
-    for (const t of TARGETS) if (!state.results[t]) waiting[t].textContent = `已等待 ${secs} 秒`;
+    for (const t of TARGETS) if (!results[t]) state.tracks[t].waitText.textContent = `已等待 ${secs} 秒`;
   }, 100);
 
   const urls = { fixed: state.config.fixed_url, auto: state.config.auto_url };
   await Promise.all(TARGETS.map(async (t) => {
-    const r = await callTarget(urls[t], body, state.config.timeout_ms);
-    state.results[t] = r;
-    renderResult(t, r);
-    if (r.outcome === "ok" && !state.shownTarget) showOnMap(t);
-    else if (state.shownTarget) setMapSwitch(t, r.outcome === "ok", false);
+    const res = await callTarget(urls[t], body, state.config.timeout_ms);
+    results[t] = res;
+    if (res.outcome === "ok") setSuccess(state.tracks[t], res);
+    else setFailed(state.tracks[t], res);
   }));
   clearInterval(ticker);
-  if (!state.shownTarget) $("#map-caption").textContent = "兩個版本都沒有成功派單，沒有路線可以顯示。";
 
   try {
     await fetch("/api/reports/order", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(reportBody(orderId, state.results)),
+      body: JSON.stringify(reportBody(orderId, results)),
     });
   } catch (err) {
     console.warn("回報 hub 失敗", err);
   }
 
   state.busy = false;
-  $("#submit").textContent = "再下一單";
-  updateSubmit();
+  again.disabled = false;
+  again.textContent = "再點一單";
+  $("#back").hidden = false;
+}
+
+function orderAgain() {
+  for (const t of Object.values(state.tracks)) t.view.stop();
+  state.qty = {};
+  state.restaurant = null;
+  $("#customer-form").reset();
+  show("home");
 }
 
 // --- 啟動 ------------------------------------------------------------------
 
 async function init() {
   initDashboard({ toggle: $("#debug-toggle"), panel: $("#dashboard"), layout: $(".layout") });
+  history.replaceState({ screen: "home" }, "");
+  $("#back").addEventListener("click", () => history.back());
+  $("#view-cart").addEventListener("click", () => {
+    renderCheckout();
+    show("checkout");
+  });
+  $("#place-order").addEventListener("click", placeOrder);
+  $("#again").addEventListener("click", orderAgain);
   try {
     [state.config, state.map] = await Promise.all([getJSON("/api/config"), getJSON("/api/map")]);
   } catch (err) {
@@ -254,12 +403,7 @@ async function init() {
     msg.hidden = false;
     return;
   }
-  state.mapView = new CityMapView($("#map"), $("#map-caption"), state.map);
   renderRestaurants();
-  $("#submit").addEventListener("click", submit);
-  for (const btn of document.querySelectorAll(".map-switch button")) {
-    btn.addEventListener("click", () => showOnMap(btn.dataset.target));
-  }
 }
 
 init();

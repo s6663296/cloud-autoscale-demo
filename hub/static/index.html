@@ -2,23 +2,93 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light dark">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#e21b70">
   <title>外送快閃</title>
   <link rel="stylesheet" href="/static/app.css">
   <script type="module" src="/static/app.js"></script>
 </head>
 <body>
   <header class="topbar">
-    <div>
-      <h1>外送快閃</h1>
-      <p class="subtitle">同一筆訂單，同時送往兩種部署</p>
-    </div>
+    <button id="back" class="icon-btn" type="button" aria-label="返回" hidden>‹</button>
+    <div class="brand"><span class="brand-mark">⚡</span>外送快閃</div>
     <button id="debug-toggle" class="debug-toggle" type="button" aria-expanded="false" aria-controls="dashboard">Debug</button>
   </header>
 
-  <main class="layout">
-    <section id="dashboard" class="panel dashboard" hidden aria-label="Debug 儀表板">
+  <div class="layout">
+    <main class="screens">
+      <!-- 首頁：店家列表 -->
+      <section id="screen-home" class="screen">
+        <div class="hero">
+          <p class="hero-label">外送至</p>
+          <p class="hero-address">📍 你目前的位置</p>
+          <p class="hero-note">同一筆訂單會同時送往「固定容量版」與「自動擴展版」兩套系統</p>
+        </div>
+        <h2 class="section-title">附近餐廳</h2>
+        <div id="restaurants" class="restaurant-list"></div>
+        <p id="load-error" class="error-text" hidden></p>
+      </section>
+
+      <!-- 店家頁：菜單 -->
+      <section id="screen-restaurant" class="screen" hidden>
+        <div id="r-cover" class="cover"></div>
+        <div class="r-info">
+          <h1 id="r-name"></h1>
+          <p id="r-meta" class="muted"></p>
+        </div>
+        <h2 class="section-title">菜單</h2>
+        <ul id="menu" class="menu"></ul>
+        <div id="cart-bar" class="bottom-bar" hidden>
+          <button id="view-cart" class="cart-button" type="button">
+            <span id="cart-count" class="badge">0</span>
+            <span>查看購物車</span>
+            <span id="cart-total">NT$ 0</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- 結帳頁 -->
+      <section id="screen-checkout" class="screen" hidden>
+        <h1 class="page-title">結帳</h1>
+        <div class="card">
+          <h2>外送資料</h2>
+          <p class="muted">全部選填。地址留空時，系統會隨機指定一個位置。</p>
+          <form id="customer-form" class="customer" autocomplete="off">
+            <label>地址<input name="address" maxlength="100" placeholder="例如：大學路 1 號"></label>
+            <label>姓名<input name="name" maxlength="40"></label>
+            <label>電話<input name="phone" inputmode="tel" maxlength="20"></label>
+            <label>給外送夥伴的備註<input name="note" maxlength="100"></label>
+          </form>
+        </div>
+        <div class="card">
+          <h2>訂單明細</h2>
+          <p id="co-restaurant" class="muted"></p>
+          <ul id="co-lines" class="lines"></ul>
+          <div class="sum-row"><span>外送費</span><span>免費</span></div>
+          <div class="sum-row total"><span>總計</span><span id="co-total">NT$ 0</span></div>
+        </div>
+        <div class="bottom-bar">
+          <button id="place-order" class="primary wide" type="button">下訂單</button>
+        </div>
+      </section>
+
+      <!-- 追蹤頁：兩個版本各一個完整追蹤區塊 -->
+      <section id="screen-tracking" class="screen" hidden>
+        <div id="tracks"></div>
+        <div class="card order-detail">
+          <h2>訂單詳情</h2>
+          <div class="detail-row"><span class="muted">訂單配送來自</span><span id="od-restaurant"></span></div>
+          <div class="detail-row"><span class="muted">送餐地址</span><span id="od-address"></span></div>
+          <ul id="od-lines" class="lines"></ul>
+          <div class="sum-row total"><span>總計</span><span id="od-total"></span></div>
+        </div>
+        <div class="bottom-bar">
+          <button id="again" class="primary wide" type="button" disabled>派單中…</button>
+        </div>
+      </section>
+    </main>
+
+    <aside id="dashboard" class="dashboard" hidden aria-label="Debug 儀表板">
       <div class="dash-head">
         <h2>Debug 儀表板</h2>
         <span id="dash-status" class="muted">連線中…</span>
@@ -48,57 +118,25 @@
           <div class="tooltip" hidden></div>
         </figure>
       </div>
-    </section>
+    </aside>
+  </div>
 
-    <div class="order-column">
-      <section class="panel">
-        <h2>1. 選擇店家</h2>
-        <div id="restaurants" class="restaurants" role="radiogroup" aria-label="店家"></div>
-        <p id="load-error" class="error-text" hidden></p>
-      </section>
-
-      <section id="menu-panel" class="panel" hidden>
-        <h2 id="menu-title">2. 選擇餐點</h2>
-        <ul id="menu" class="menu"></ul>
-        <details class="customer">
-          <summary>顧客資料（選填）</summary>
-          <label>姓名<input name="name" autocomplete="off" maxlength="40"></label>
-          <label>電話<input name="phone" inputmode="tel" autocomplete="off" maxlength="20"></label>
-          <label>地址<input name="address" autocomplete="off" maxlength="100" placeholder="留空則隨機指定位置"></label>
-          <label>備註<input name="note" autocomplete="off" maxlength="100"></label>
-        </details>
-        <div class="submit-row">
-          <span id="total" class="total">NT$ 0</span>
-          <button id="submit" class="primary" type="button" disabled>送出訂單</button>
-        </div>
-      </section>
-
-      <section id="results" class="panel" hidden>
-        <h2>3. 派單結果</h2>
-        <div class="status-cards">
-          <article class="status-card" data-target="fixed">
-            <h3><span class="swatch swatch-fixed"></span>固定容量版</h3>
-            <div class="status-body"></div>
-          </article>
-          <article class="status-card" data-target="auto">
-            <h3><span class="swatch swatch-auto"></span>自動擴展版</h3>
-            <div class="status-body"></div>
-          </article>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="map-head">
-          <h2>外送地圖</h2>
-          <div class="map-switch" role="group" aria-label="顯示哪個版本的結果">
-            <button type="button" data-target="fixed" disabled><span class="swatch swatch-fixed"></span>固定版</button>
-            <button type="button" data-target="auto" disabled><span class="swatch swatch-auto"></span>擴展版</button>
-          </div>
-        </div>
-        <svg id="map" class="map" role="img" aria-label="城市地圖"></svg>
-        <p id="map-caption" class="muted map-caption">選擇店家並下單後，這裡會播放外送路線。</p>
-      </section>
-    </div>
-  </main>
+  <template id="track-template">
+    <article class="track">
+      <header class="track-head"><span class="swatch"></span><span class="track-title"></span><span class="tag"></span></header>
+      <div class="track-map"><svg class="map" role="img" aria-label="外送地圖"></svg></div>
+      <div class="track-body">
+        <p class="eta-label">預估外送時間</p>
+        <p class="eta"></p>
+        <div class="progress" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+        <p class="status-text"></p>
+        <p class="status-meta muted"></p>
+      </div>
+      <div class="rider-card" hidden>
+        <div class="avatar">🛵</div>
+        <div><strong class="rider-name"></strong><span class="muted">你的外送夥伴</span></div>
+      </div>
+    </article>
+  </template>
 </body>
 </html>

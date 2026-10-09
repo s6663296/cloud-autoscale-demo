@@ -1,15 +1,13 @@
-// 城市地圖：SVG 畫出路網、店家、顧客與路線，並依 schedule 播放外送員動畫。
+// 外送地圖：以 SVG 畫成 Google 地圖風格，依 schedule 播放外送員動畫。
+// 每個追蹤區塊各有一個 CityMapView，動畫時鐘從該版本的結果到達時開始，彼此獨立。
 
-import { fitView, PLAYBACK_MS, riderPosition, roadPaths, simSeconds } from "./logic.js";
+import { decorations, fitView, riderPosition, roadPaths, simSeconds } from "./logic.js";
 
 const NS = "http://www.w3.org/2000/svg";
-
-const PHASE_TEXT = {
-  to_restaurant: "前往店家",
-  waiting: "在店家等待備餐",
-  to_customer: "送餐中",
-  delivered: "已送達",
-};
+const ASPECT = 4 / 3;
+const ROW_NAMES = ["中正路", "民生路", "忠孝路", "仁愛路"];
+const COL_NAMES = ["中山路", "復興路", "光復路", "敦化路"];
+const PIN_PATH = "M0 0C-3 -7 -14 -12 -14 -24A14 14 0 1 1 14 -24C14 -12 3 -7 0 0Z";
 
 function el(name, attrs = {}, parent = null) {
   const node = document.createElementNS(NS, name);
@@ -18,104 +16,158 @@ function el(name, attrs = {}, parent = null) {
   return node;
 }
 
-export class CityMapView {
-  constructor(svg, caption, map) {
-    this.svg = svg;
-    this.caption = caption;
-    this.map = map;
-    this.activeRestaurant = null;
-    this.result = null;
-    this.target = null;
-    this.frame = 0;
+const nonScaling = { "vector-effect": "non-scaling-stroke" };
 
+export class CityMapView {
+  constructor(svg, map, { onFrame } = {}) {
+    this.svg = svg;
+    this.map = map;
+    this.onFrame = onFrame;
+    this.frame = 0;
+    this.result = null;
+    this.restaurant = null;
+    this.glyph = "🏪";
+    this.mode = "idle";
+
+    const { size } = map;
+    const deco = decorations(map);
     const paths = roadPaths(map);
     const base = el("g", {}, svg);
-    for (const cls of ["roads", "closed", "arterials"]) {
-      el("path", { d: paths[cls], class: cls, "vector-effect": "non-scaling-stroke" }, base);
+    el("rect", { x: -20, y: -20, width: size + 40, height: size + 40, fill: "var(--map-bg)" }, base);
+    // 小路在下、綠地與河流在中、主幹道在上：河上只有主幹道跨過，像橋一樣
+    el("path", { d: paths.roads, class: "road", ...nonScaling }, base);
+    for (const p of deco.parks) {
+      el("rect", { x: p.x + 0.1, y: p.y + 0.1, width: p.w - 0.2, height: p.h - 0.2, rx: 0.4, class: "park" }, base);
     }
+    el("path", {
+      d: deco.river.map(([x, y], i) => `${i ? "L" : "M"}${x} ${y}`).join(""),
+      class: "water", "stroke-width": 2.2,
+    }, base);
+    el("path", { d: paths.arterials, class: "arterial-edge", ...nonScaling }, base);
+    el("path", { d: paths.arterials, class: "arterial", ...nonScaling }, base);
+    this.labels = el("g", {}, svg);
     this.overlay = el("g", {}, svg);
-    this.setView([-1, -1, map.size + 1, map.size + 1]);
+    this.setView([[size / 2, size / 2]], size);
   }
 
-  setView(view) {
-    this.view = view;
-    this.svg.setAttribute("viewBox", view.join(" "));
+  // --- 狀態 ---------------------------------------------------------------
+
+  showWaiting(restaurant, glyph) {
+    this.stop();
+    Object.assign(this, { restaurant, glyph, result: null, mode: "waiting" });
+    this.setView([restaurant.node], 12);
+  }
+
+  showFailed() {
+    this.stop();
+    this.mode = "failed";
     this.draw();
   }
 
-  highlightRestaurant(id) {
-    this.activeRestaurant = id;
-    this.draw();
-  }
-
-  clearResult() {
-    cancelAnimationFrame(this.frame);
-    this.result = null;
-    this.target = null;
-    this.setView([-1, -1, this.map.size + 1, this.map.size + 1]);
-    this.caption.textContent = "派單中…";
-  }
-
-  showResult(target, result) {
-    cancelAnimationFrame(this.frame);
+  showResult(result) {
+    this.stop();
     this.result = result;
-    this.target = target;
+    this.mode = "result";
     const { to_restaurant: toR, to_customer: toC } = result.route;
-    this.setView(fitView([...toR, ...toC], this.map.size, { minSpan: 14, pad: 2 }));
+    this.setView([...toR, ...toC], 12);
     this.started = performance.now();
     this.animate();
   }
 
-  // 依目前視野大小決定標記尺寸，縮放後看起來一樣大
-  unit() {
-    return this.view[2] / 60;
+  stop() {
+    cancelAnimationFrame(this.frame);
+  }
+
+  // --- 繪製 ---------------------------------------------------------------
+
+  setView(points, minSpan) {
+    const [x, y, span] = fitView(points, this.map.size, { minSpan, pad: 2 });
+    // 圖釘往上突出約 40px，上方多留一些空間避免被切掉
+    const h = span * 1.2;
+    const w = h * ASPECT;
+    // 盡量不露出城市範圍外的空白
+    const clamp = (v, len) => (len >= this.map.size + 1 ? v : Math.min(Math.max(v, -0.5), this.map.size - 0.5 - len));
+    this.view = [clamp(x + span / 2 - w / 2, w), clamp(y - span * 0.15, h), w, h];
+    this.svg.setAttribute("viewBox", this.view.join(" "));
+    // 縮小時小路變細，避免擠成一片
+    const pxPerUnit = (this.svg.clientWidth || 360) / w;
+    this.svg.dataset.zoom = pxPerUnit >= 20 ? "near" : pxPerUnit >= 12 ? "mid" : "far";
+    this.draw();
+  }
+
+  /** 每個螢幕像素對應的地圖單位，讓圖釘與文字在任何縮放下維持相同大小。 */
+  px() {
+    return this.view[2] / (this.svg.clientWidth || 360);
   }
 
   draw() {
-    const u = this.unit();
+    const k = this.px();
+    this.drawLabels(k);
     this.overlay.replaceChildren();
-    if (this.result) this.drawRoutes(u);
-    for (const r of this.map.restaurants) {
-      const [x, y] = r.node;
-      const active = r.id === (this.result ? this.result.restaurant.id : this.activeRestaurant);
-      el("rect", {
-        x: x - 1.1 * u, y: y - 1.1 * u, width: 2.2 * u, height: 2.2 * u, rx: 0.5 * u,
-        class: `restaurant-pin${active ? " active" : ""}`, "vector-effect": "non-scaling-stroke",
-      }, this.overlay);
-      const label = el("text", {
-        x: x + 1.6 * u, y: y + 0.9 * u, class: "restaurant-label", "font-size": 2.4 * u, "stroke-width": 0.6 * u,
-      }, this.overlay);
-      label.textContent = r.name;
+    if (this.result) {
+      const line = (nodes) => nodes.map(([x, y], i) => `${i ? "L" : "M"}${x} ${y}`).join("");
+      el("path", { d: line(this.result.route.to_restaurant), class: "route-to-restaurant", ...nonScaling }, this.overlay);
+      el("path", { d: line(this.result.route.to_customer), class: "route-to-customer", ...nonScaling }, this.overlay);
+      const [cx, cy] = this.result.customer_node;
+      this.customerPin(cx, cy, k);
+    }
+    if (this.restaurant) {
+      const [x, y] = this.restaurant.node;
+      this.restaurantPin(x, y, k, this.mode === "waiting");
     }
     if (this.result) {
-      const [cx, cy] = this.result.customer_node;
-      el("circle", { cx, cy, r: 1.2 * u, class: "customer-pin", "vector-effect": "non-scaling-stroke" }, this.overlay);
-      this.rider = el("circle", { r: 1.3 * u, class: `rider ${this.target}-fill`, "vector-effect": "non-scaling-stroke" }, this.overlay);
+      this.rider = el("g", {}, this.overlay);
+      el("circle", { r: 14, class: "rider-bg" }, this.rider);
+      const t = el("text", { "text-anchor": "middle", "dominant-baseline": "central", "font-size": 16, y: 1 }, this.rider);
+      t.textContent = "🛵";
     }
   }
 
-  drawRoutes() {
-    const line = (nodes) => nodes.map(([x, y], i) => `${i ? "L" : "M"}${x} ${y}`).join("");
-    el("path", {
-      d: line(this.result.route.to_restaurant),
-      class: `route-to-restaurant ${this.target}-stroke`, "vector-effect": "non-scaling-stroke",
-    }, this.overlay);
-    el("path", {
-      d: line(this.result.route.to_customer),
-      class: `route-to-customer ${this.target}-stroke`, "vector-effect": "non-scaling-stroke",
-    }, this.overlay);
+  drawLabels(k) {
+    this.labels.replaceChildren();
+    const [vx, vy, vw, vh] = this.view;
+    const label = (text, x, y, rotate) => {
+      const node = el("text", {
+        x, y, class: "road-label", "font-size": 10 * k, "stroke-width": 3 * k,
+        "text-anchor": "middle", "dominant-baseline": "central",
+        ...(rotate ? { transform: `rotate(-90 ${x} ${y})` } : {}),
+      }, this.labels);
+      node.textContent = text;
+    };
+    this.map.arterials.rows.forEach((y, i) => {
+      if (y > vy && y < vy + vh) label(ROW_NAMES[i % ROW_NAMES.length], vx + vw * 0.25, y, false);
+    });
+    this.map.arterials.cols.forEach((x, i) => {
+      if (x > vx && x < vx + vw) label(COL_NAMES[i % COL_NAMES.length], x, vy + vh * 0.72, true);
+    });
   }
 
+  restaurantPin(x, y, k, pulsing) {
+    const g = el("g", { transform: `translate(${x} ${y}) scale(${k})` }, this.overlay);
+    if (pulsing) {
+      const ring = el("circle", { cy: -24, r: 16, class: "pin-ring" }, g);
+      el("animate", { attributeName: "r", values: "16;30;16", dur: "1.6s", repeatCount: "indefinite" }, ring);
+    }
+    el("path", { d: PIN_PATH, class: "pin-restaurant" }, g);
+    const t = el("text", { y: -23, "text-anchor": "middle", "dominant-baseline": "central", "font-size": 15 }, g);
+    t.textContent = this.glyph;
+  }
+
+  customerPin(x, y, k) {
+    const g = el("g", { transform: `translate(${x} ${y}) scale(${k})` }, this.overlay);
+    el("path", { d: PIN_PATH, class: "pin-customer" }, g);
+    el("circle", { cy: -28, r: 4, fill: "#fff" }, g);
+    el("path", { d: "M-7 -16A7 7 0 0 1 7 -16Z", fill: "#fff" }, g);
+  }
+
+  // --- 動畫 ---------------------------------------------------------------
+
   animate() {
-    const { schedule, route, rider, eta_minutes: eta } = this.result;
+    const { schedule, route } = this.result;
     const t = simSeconds(performance.now() - this.started, schedule.deliver_s);
     const pos = riderPosition(route, schedule, t);
-    this.rider.setAttribute("cx", pos.x);
-    this.rider.setAttribute("cy", pos.y);
-    const minute = Math.floor(t / 60);
-    this.caption.textContent = pos.phase === "delivered"
-      ? `外送員 ${rider.name} 已送達，共 ${eta} 分鐘（動畫以 ${PLAYBACK_MS / 1000} 秒播放整趟）`
-      : `外送員 ${rider.name} ${PHASE_TEXT[pos.phase]} · 第 ${minute} 分鐘`;
+    this.rider.setAttribute("transform", `translate(${pos.x} ${pos.y}) scale(${this.px()})`);
+    this.onFrame?.(t, pos);
     if (pos.phase !== "delivered") this.frame = requestAnimationFrame(() => this.animate());
   }
 }

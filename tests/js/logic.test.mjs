@@ -137,3 +137,63 @@ test("formatPct 與 formatMs", () => {
   assert.equal(formatMs(412.4), "412 ms");
   assert.equal(formatMs(15000), "15.0 s");
 });
+
+// --- 購物車 ----------------------------------------------------------------
+
+import { cartLines, cartSummary, decorations, etaText, trackingProgress } from "../../hub/static/logic.js";
+
+const MENU = [
+  { id: "r1-m1", name: "紅燒牛肉麵", price: 180 },
+  { id: "r1-m2", name: "清燉牛肉麵", price: 190 },
+  { id: "r1-m3", name: "燙青菜", price: 50 },
+];
+
+test("cartSummary 計算件數與總額", () => {
+  assert.deepEqual(cartSummary(MENU, {}), { count: 0, total: 0 });
+  assert.deepEqual(cartSummary(MENU, { "r1-m1": 1, "r1-m2": 2, "r1-m3": 0 }), { count: 3, total: 560 });
+});
+
+test("cartLines 依菜單順序列出數量大於 0 的品項", () => {
+  assert.deepEqual(cartLines(MENU, { "r1-m3": 1, "r1-m1": 2 }), [
+    { id: "r1-m1", name: "紅燒牛肉麵", qty: 2, subtotal: 360 },
+    { id: "r1-m3", name: "燙青菜", qty: 1, subtotal: 50 },
+  ]);
+});
+
+// --- 追蹤進度 --------------------------------------------------------------
+
+test("trackingProgress 依行程分成四段", () => {
+  const s = { arrive_restaurant_s: 100, pickup_s: 300, deliver_s: 700 };
+  assert.deepEqual(trackingProgress(s, 0), { step: 0, frac: 0 });
+  assert.deepEqual(trackingProgress(s, 50), { step: 0, frac: 0.5 });
+  assert.deepEqual(trackingProgress(s, 200), { step: 1, frac: 0.5 });
+  assert.deepEqual(trackingProgress(s, 500), { step: 2, frac: 0.5 });
+  assert.deepEqual(trackingProgress(s, 700), { step: 3, frac: 1 });
+});
+
+test("trackingProgress 外送員已在店家、不需等待時直接進入外送中", () => {
+  const s = { arrive_restaurant_s: 0, pickup_s: 0, deliver_s: 60 };
+  assert.deepEqual(trackingProgress(s, 0), { step: 2, frac: 0 });
+});
+
+test("etaText 顯示剩餘時間", () => {
+  assert.equal(etaText(1380, 0), "23 分鐘");
+  assert.equal(etaText(1380, 1361), "少於 5 分鐘");
+  assert.equal(etaText(1380, 1380), "已送達");
+  assert.equal(etaText(1381, 0), "24 分鐘");
+});
+
+// --- 地圖裝飾 --------------------------------------------------------------
+
+test("decorations 對同一張地圖結果固定，且都在地圖範圍內", () => {
+  const map = { size: 60 };
+  const a = decorations(map);
+  assert.deepEqual(a, decorations(map));
+  assert.ok(a.parks.length >= 3);
+  for (const p of a.parks) {
+    assert.ok(p.x >= 0 && p.y >= 0 && p.x + p.w <= 59 && p.y + p.h <= 59);
+  }
+  assert.ok(a.river.length >= 2);
+  assert.ok(a.river.every(([x, y]) => x >= -1 && x <= 60 && y >= -1 && y <= 60));
+  assert.notDeepEqual(decorations({ size: 30 }), a);
+});

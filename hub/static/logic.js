@@ -167,3 +167,74 @@ export function formatMs(ms) {
   if (ms === null || ms === undefined) return "—";
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
+
+// --- 購物車 ----------------------------------------------------------------
+
+export function cartLines(menu, qty) {
+  return menu
+    .filter((m) => (qty[m.id] || 0) > 0)
+    .map((m) => ({ id: m.id, name: m.name, qty: qty[m.id], subtotal: m.price * qty[m.id] }));
+}
+
+export function cartSummary(menu, qty) {
+  const lines = cartLines(menu, qty);
+  return {
+    count: lines.reduce((n, l) => n + l.qty, 0),
+    total: lines.reduce((n, l) => n + l.subtotal, 0),
+  };
+}
+
+// --- 追蹤進度 --------------------------------------------------------------
+
+/** 四段進度：0 前往店家、1 備餐中、2 外送中、3 已送達；frac 為目前這段的完成比例。 */
+export function trackingProgress(schedule, t) {
+  const { arrive_restaurant_s: arrive, pickup_s: pickup, deliver_s: deliver } = schedule;
+  const ratio = (a, b) => (b > a ? Math.min(1, Math.max(0, (t - a) / (b - a))) : 1);
+  if (t >= deliver) return { step: 3, frac: 1 };
+  if (t < arrive) return { step: 0, frac: ratio(0, arrive) };
+  if (t < pickup) return { step: 1, frac: ratio(arrive, pickup) };
+  return { step: 2, frac: ratio(pickup, deliver) };
+}
+
+export function etaText(deliverS, t) {
+  const remaining = deliverS - t;
+  if (remaining <= 0) return "已送達";
+  if (remaining < 300) return "少於 5 分鐘";
+  return `${Math.ceil(remaining / 60)} 分鐘`;
+}
+
+// --- 地圖裝飾 --------------------------------------------------------------
+
+function seeded(seed) {
+  // mulberry32：每支手機畫出相同的綠地與河流
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** 純裝飾的綠地與河流，畫在道路下方，不影響路網。 */
+export function decorations(map) {
+  const { size } = map;
+  const rand = seeded(size * 7919 + 17);
+  const span = (lo, hi) => lo + Math.floor(rand() * (hi - lo + 1));
+  const parks = [];
+  const count = Math.max(3, Math.round(size / 12));
+  for (let i = 0; i < count; i++) {
+    const w = span(2, Math.max(2, Math.round(size / 12)));
+    const h = span(2, Math.max(2, Math.round(size / 12)));
+    parks.push({ x: span(0, size - 1 - w), y: span(0, size - 1 - h), w, h });
+  }
+  const river = [];
+  const base = size * (0.55 + rand() * 0.3);
+  for (let i = 0; i <= 8; i++) {
+    const x = -1 + ((size + 1) * i) / 8;
+    const y = Math.min(size, Math.max(-1, base + Math.sin(i * 0.9 + rand()) * size * 0.08));
+    river.push([Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
+  }
+  return { parks, river };
+}
