@@ -11,10 +11,7 @@ from shared.citymap import CityMap, Node, get_city
 
 TRAFFIC_PERIOD_MIN = 30
 
-RIDER_NAMES = [
-    "陳志明", "林怡君", "黃俊傑", "張雅婷", "李建宏", "王淑芬", "吳宗翰", "劉佳穎",
-    "蔡承恩", "楊詩涵", "許家豪", "鄭雅雯", "謝冠宇", "郭欣怡", "洪柏翰", "曾郁婷",
-]
+RIDER_NAMES = ["王立閎"]
 
 
 class InvalidOrder(ValueError):
