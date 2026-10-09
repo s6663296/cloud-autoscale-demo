@@ -107,17 +107,16 @@ export class CityMapView {
   }
 
   /**
-   * 外送員改道後，走過的路、接下來的路線或目的地可能落在目前視野外；
-   * 只要有一點超出（含邊緣留白），就以這些點重新取景，讓畫面跟著外送員。
+   * 外送員改道後，走過的路、接下來的路線或目的地可能落在目前視野外，這時才重新取景。
+   * 判斷用視野本身的邊界（取景時已留邊），否則每次更新都會重取景、越縮越近；
+   * 重新取景時也不比目前更近，只平移或拉遠，避免畫面一直縮放。
    */
   follow() {
     const { current, upcoming } = this.routes();
     const points = [...this.track.trail, ...(current || []), ...(upcoming || []), this.result.customer_node];
     const [vx, vy, vw, vh] = this.view;
-    const m = vw * 0.06;
-    // 圖釘往上突出，上緣多留一些
-    const inside = ([x, y]) => x >= vx + m && x <= vx + vw - m && y >= vy + vh * 0.15 && y <= vy + vh - m;
-    if (!points.every(inside)) this.setView(points, 12);
+    const inside = ([x, y]) => x >= vx && x <= vx + vw && y >= vy && y <= vy + vh;
+    if (!points.every(inside)) this.setView(points, Math.max(12, vh / 1.2));
   }
 
   /** 不再使用這張地圖時呼叫。 */
