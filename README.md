@@ -363,7 +363,7 @@ ALLOWED_ORIGIN=http://localhost:8000,http://127.0.0.1:8000 .venv/Scripts/python 
 FIXED_URL=http://localhost:8001 AUTO_URL=http://localhost:8001 .venv/Scripts/python -m uvicorn web.main:app --port 8000
 ```
 
-Windows 最簡單的方式：雙擊專案根目錄的 `run_local.bat`，會開三個視窗（固定版 8001、擴展版 8002 以 8 個 worker 模擬擴展到上限、web 8000）並開啟瀏覽器。
+Windows 最簡單的方式：雙擊專案根目錄的 `run_local.bat`，會開三個視窗（固定版 8001、擴展版 8002 以 8 個 worker 模擬擴展到上限、web 8000）並開啟瀏覽器。第一次執行時若沒有 `.venv`，會自動以 Python 3.10 以上版本建立並安裝 `requirements.txt`；之後 `requirements.txt` 有變動時也會自動重新安裝。
 
 Windows cmd 手動啟動（兩個視窗各執行一組）：
 
