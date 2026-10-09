@@ -123,7 +123,8 @@ async function callTarget(url, body, timeoutMs) {
   } catch (err) {
     const latencyMs = performance.now() - start;
     if (ctrl.signal.aborted) return { outcome: "timeout", latencyMs, instanceId: null };
-    return { outcome: "error", detail: "無法連線", latencyMs, instanceId: null };
+    // 瀏覽器無法區分服務未啟動與 CORS 被擋，兩者都會走到這裡
+    return { outcome: "error", detail: "無法連線（服務未啟動或 CORS 未允許此網址）", latencyMs, instanceId: null };
   } finally {
     clearTimeout(timer);
   }

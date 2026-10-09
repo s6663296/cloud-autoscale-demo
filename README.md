@@ -252,7 +252,7 @@ python -m loadtest probe --target <URL> --report-to <HUB_URL>
 | `CANDIDATES` | dispatch | 5 | 候選外送員數 |
 | `ALT_ROUTES` / `ALT_PENALTY` | dispatch | 3 / 1.5 | 替代路線數與懲罰倍率 |
 | `RELIABILITY_WEIGHT` | dispatch | 0.5 | 評分中路線穩定度的權重 |
-| `ALLOWED_ORIGIN` | dispatch | — | `hub` 的網址（CORS） |
+| `ALLOWED_ORIGIN` | dispatch | — | `hub` 的網址（CORS），多個以逗號分隔 |
 | `FIXED_URL` / `AUTO_URL` | hub | — | 兩個 dispatch 服務的網址 |
 | `TIMEOUT_MS` | hub | 15000 | 前端逾時 |
 
@@ -283,14 +283,14 @@ python -m venv .venv
 bash：
 
 ```bash
-ALLOWED_ORIGIN=http://localhost:8000 .venv/Scripts/python -m uvicorn dispatch.main:app --port 8001
+ALLOWED_ORIGIN=http://localhost:8000,http://127.0.0.1:8000 .venv/Scripts/python -m uvicorn dispatch.main:app --port 8001
 FIXED_URL=http://localhost:8001 AUTO_URL=http://localhost:8001 .venv/Scripts/python -m uvicorn hub.main:app --port 8000
 ```
 
 Windows cmd（兩個視窗各執行一組）：
 
 ```cmd
-set ALLOWED_ORIGIN=http://localhost:8000
+set ALLOWED_ORIGIN=http://localhost:8000,http://127.0.0.1:8000
 .venv\Scripts\python -m uvicorn dispatch.main:app --port 8001
 
 set FIXED_URL=http://localhost:8001
@@ -301,7 +301,7 @@ set AUTO_URL=http://localhost:8001
 PowerShell：
 
 ```powershell
-$env:ALLOWED_ORIGIN = "http://localhost:8000"
+$env:ALLOWED_ORIGIN = "http://localhost:8000,http://127.0.0.1:8000"
 .venv\Scripts\python -m uvicorn dispatch.main:app --port 8001
 
 $env:FIXED_URL = "http://localhost:8001"; $env:AUTO_URL = "http://localhost:8001"

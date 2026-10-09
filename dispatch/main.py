@@ -63,7 +63,7 @@ def create_app(allowed_origin: str = config.ALLOWED_ORIGIN) -> FastAPI:
     app = FastAPI(title="dispatch", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[allowed_origin] if allowed_origin else [],
+        allow_origins=[o.strip() for o in allowed_origin.split(",") if o.strip()],
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
     )

@@ -145,6 +145,15 @@ def test_cors_allows_only_configured_origin(client):
     assert "access-control-allow-origin" not in _preflight(client, "https://evil.example").headers
 
 
+def test_cors_accepts_comma_separated_origins(monkeypatch):
+    monkeypatch.setattr(main, "fetch_metadata_instance_id", _no_metadata)
+    app = main.create_app(allowed_origin="http://localhost:8000, http://127.0.0.1:8000")
+    with TestClient(app) as c:
+        for origin in ("http://localhost:8000", "http://127.0.0.1:8000"):
+            assert _preflight(c, origin).headers.get("access-control-allow-origin") == origin
+        assert "access-control-allow-origin" not in _preflight(c, "https://evil.example").headers
+
+
 def test_instance_id_from_metadata():
     assert main.resolve_instance_id(lambda: "00bf4bf0abc") == "00bf4bf0abc"
 
