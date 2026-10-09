@@ -1,4 +1,4 @@
-"""派單 API（README 5.1）。"""
+"""派單與配送追蹤 API（README 5.1）。"""
 
 import os
 import random
@@ -6,7 +6,7 @@ import socket
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Callable
+from typing import Any, Callable
 
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from dispatch import config
 from dispatch.engine import InvalidOrder, Order, dispatch_order
+from dispatch.tracking import InvalidTracking, advance, start_tracking
 from shared.citymap import get_city
 
 METADATA_URL = "http://metadata.google.internal/computeMetadata/v1/instance/id"
@@ -40,6 +41,11 @@ class OrderRequest(BaseModel):
     seed: int | None = None
 
 
+class TrackRequest(BaseModel):
+    order_id: str = ""
+    tracking: Any = None
+
+
 def fetch_metadata_instance_id() -> str:
     res = httpx.get(METADATA_URL, headers={"Metadata-Flavor": "Google"}, timeout=1.0)
     res.raise_for_status()
@@ -53,7 +59,7 @@ def resolve_instance_id(fetch: Callable[[], str]) -> str:
         return f"local-{socket.gethostname()}-{os.getpid()}"
 
 
-def create_app(allowed_origin: str = config.ALLOWED_ORIGIN) -> FastAPI:
+def create_app(allowed_origin: str = config.ALLOWED_ORIGIN, clock: Callable[[], float] = time.time) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.instance_id = resolve_instance_id(fetch_metadata_instance_id)
@@ -77,9 +83,10 @@ def create_app(allowed_origin: str = config.ALLOWED_ORIGIN) -> FastAPI:
             items=[(item.item_id, item.qty) for item in req.items],
             address=req.customer.address,
         )
+        now = clock()
         start = time.perf_counter()
         try:
-            result = dispatch_order(order, time.time(), rng)
+            result = dispatch_order(order, now, rng)
         except InvalidOrder as e:
             raise HTTPException(status_code=422, detail=str(e))
         compute_ms = round((time.perf_counter() - start) * 1000, 1)
@@ -89,6 +96,23 @@ def create_app(allowed_origin: str = config.ALLOWED_ORIGIN) -> FastAPI:
             "instance_id": app.state.instance_id,
             "compute_ms": compute_ms,
             **result,
+            "tracking": start_tracking(result, now),
+        }
+
+    @app.post("/api/track")
+    def track(req: TrackRequest) -> dict:
+        start = time.perf_counter()
+        try:
+            state, view = advance(req.tracking, clock())
+        except InvalidTracking as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return {
+            "order_id": req.order_id,
+            "service": config.SERVICE,
+            "instance_id": app.state.instance_id,
+            "compute_ms": round((time.perf_counter() - start) * 1000, 1),
+            **view,
+            "tracking": state,
         }
 
     @app.get("/api/healthz")

@@ -8,7 +8,11 @@ from dispatch import config, main
 
 RESPONSE_FIELDS = {
     "order_id", "service", "instance_id", "compute_ms", "restaurant", "customer_node",
-    "total_price", "rider", "route", "schedule", "eta_minutes", "candidates_evaluated",
+    "total_price", "rider", "route", "schedule", "eta_minutes", "candidates_evaluated", "tracking",
+}
+TRACK_FIELDS = {
+    "order_id", "service", "instance_id", "compute_ms", "phase", "position", "trail", "route",
+    "eta_s", "sim_s", "tracking",
 }
 
 
@@ -51,16 +55,16 @@ def test_valid_order_returns_readme_fields(client):
 
 
 def test_same_seed_same_response_except_compute_ms(client):
-    a = client.post("/api/orders", json=_order(seed=42)).json()
-    b = client.post("/api/orders", json=_order(seed=42)).json()
-    a.pop("compute_ms")
-    b.pop("compute_ms")
+    a = _without_compute_ms(client.post("/api/orders", json=_order(seed=42)))
+    b = _without_compute_ms(client.post("/api/orders", json=_order(seed=42)))
     assert a == b
 
 
 def _without_compute_ms(res):
+    """去掉每次都不同的欄位：運算時間與追蹤狀態中的派單時刻。"""
     data = res.json()
     data.pop("compute_ms")
+    data["tracking"].pop("dispatched_at")
     return data
 
 
@@ -160,3 +164,67 @@ def test_instance_id_from_metadata():
 
 def test_instance_id_fallback():
     assert main.resolve_instance_id(_no_metadata) == f"local-{socket.gethostname()}-{os.getpid()}"
+
+
+# --- 配送追蹤 ---------------------------------------------------------------
+
+
+class FakeClock:
+    def __init__(self, t=1_760_000_000.0):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+
+def _app(monkeypatch, clock):
+    monkeypatch.setattr(main, "fetch_metadata_instance_id", _no_metadata)
+    return TestClient(main.create_app(allowed_origin="https://web.example", clock=clock))
+
+
+def test_order_returns_initial_tracking(client):
+    data = client.post("/api/orders", json=_order(seed=3)).json()
+    assert data["tracking"]["v"] == 1
+    assert data["tracking"]["phase"] == "to_restaurant"
+    assert data["tracking"]["node"] == data["route"]["to_restaurant"][0]
+
+
+def test_track_advances_until_delivered(monkeypatch):
+    clock = FakeClock()
+    with _app(monkeypatch, clock) as c:
+        order = c.post("/api/orders", json=_order(seed=3)).json()
+        tracking, phases = order["tracking"], []
+        for _ in range(500):
+            clock.t += 2
+            res = c.post("/api/track", json={"order_id": order["order_id"], "tracking": tracking})
+            assert res.status_code == 200
+            data = res.json()
+            assert set(data) == TRACK_FIELDS
+            assert data["order_id"] == order["order_id"]
+            tracking = data["tracking"]
+            phases.append(data["phase"])
+            if data["phase"] == "delivered":
+                break
+    assert phases[-1] == "delivered"
+    assert data["position"] == order["customer_node"] and data["eta_s"] == 0
+
+
+def test_track_is_stateless_across_instances(monkeypatch):
+    """兩個獨立的 app 交替處理同一筆配送，結果與單一 app 相同。"""
+    clock = FakeClock()
+    with _app(monkeypatch, clock) as a, _app(monkeypatch, clock) as b:
+        order = a.post("/api/orders", json=_order(seed=5)).json()
+        single, mixed = order["tracking"], order["tracking"]
+        for i in range(12):
+            clock.t += 2
+            one = a.post("/api/track", json={"tracking": single}).json()
+            other = (a if i % 2 else b).post("/api/track", json={"tracking": mixed}).json()
+            for d in (one, other):
+                d.pop("compute_ms")
+            assert one == other
+            single, mixed = one["tracking"], other["tracking"]
+
+
+@pytest.mark.parametrize("tracking", [{}, {"v": 1}, "nope", None, {"v": 2, "phase": "to_restaurant"}])
+def test_track_rejects_invalid_state(client, tracking):
+    assert client.post("/api/track", json={"tracking": tracking}).status_code == 422
