@@ -191,6 +191,7 @@ flowchart LR
 | `GET /api/config` | `{ "fixed_url", "auto_url", "timeout_ms", "track_interval_ms" }` |
 | `GET /api/map` | 路網尺寸、封閉路段、主幹道、店家與菜單 |
 | `POST /api/reports/order` | 手機回報單筆訂單於兩個版本的派單結果 |
+| `POST /api/reports/track` | 手機回報單次追蹤請求的結果 |
 | `POST /api/reports/loadtest` | 壓力測試每秒回報彙總 |
 | `GET /api/stream` | SSE，每秒推送一次 `snapshot` 事件 |
 
@@ -204,6 +205,12 @@ flowchart LR
     { "target": "auto", "outcome": "ok", "latency_ms": 412, "instance_id": "00bf4bf0..." }
   ]
 }
+```
+
+`POST /api/reports/track`（每次追蹤請求結束後回報一次，成功或失敗皆回報）：
+
+```json
+{ "target": "auto", "outcome": "ok", "latency_ms": 18, "instance_id": "00bf4bf0..." }
 ```
 
 `POST /api/reports/loadtest`（下單與追蹤請求合併計數）：
@@ -257,14 +264,14 @@ flowchart LR
 | 指標 | 計算方式 |
 |---|---|
 | 活躍執行個體數 | 最近 10 秒內曾處理請求的不同 `instance_id` 數量 |
-| RPS | 最近 60 秒完成的請求數 ÷ 60（觀眾下單與壓力測試的下單、追蹤合計） |
+| RPS | 最近 60 秒完成的請求數 ÷ 60（觀眾與壓力測試的下單、追蹤合計） |
 | 成功率 | 最近 60 秒 `ok` ÷ 完成數 |
 | p50 / p95 延遲 | 最近 60 秒延遲樣本的分位數，逾時以 15000 毫秒計 |
 | 失敗分類 | 最近 60 秒 `timeout`、`busy`、`error` 各自計數 |
 | 觀眾訂單 | 最近 60 秒觀眾下單數，以及兩個版本各自成功數 |
 | 趨勢圖 | 最近 10 分鐘，每 10 秒一點，繪製成功率與 p95 延遲 |
 
-`instance_id` 由各執行個體啟動時向 Cloud Run metadata server 取得。閒置中的執行個體不計入活躍數，總數以 GCP 主控台為準。觀眾手機的追蹤請求不回報 web（數量少，且壓力測試已涵蓋追蹤負載）。
+`instance_id` 由各執行個體啟動時向 Cloud Run metadata server 取得。閒置中的執行個體不計入活躍數，總數以 GCP 主控台為準。觀眾手機的追蹤結果也逐筆回報 web，因此只有觀眾下單、未開壓力測試時，配送進行中的執行個體仍計入活躍數；追蹤不計入「觀眾訂單」。
 
 ## 7. 壓力測試工具
 

@@ -5,7 +5,7 @@
 import { initDashboard } from "./dashboard.js";
 import {
   buildOrderBody, cartLines, cartSummary, etaText, formatMs, makeOrderId,
-  outcomeFromStatus, progressFromTrack, reportBody, TARGETS,
+  outcomeFromStatus, progressFromTrack, reportBody, TARGETS, trackReportBody,
 } from "./logic.js";
 import { CityMapView } from "./map.js";
 
@@ -262,6 +262,7 @@ function createTracks() {
       meta: node.querySelector(".status-meta"),
       trackMeta: node.querySelector(".track-meta"),
       rider: node.querySelector(".rider-card"),
+      target,
       result: null,
       stopped: false,
     };
@@ -316,6 +317,15 @@ function showProgress(track, phase, simS, etaS) {
   track.status.textContent = STEP_TEXT[p.step];
 }
 
+/** 把單次追蹤的結果回報 web，讓儀表板在配送期間也看得到這台執行個體；不等待回應。 */
+function reportTrack(target, r) {
+  fetch("/api/reports/track", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(trackReportBody(target, r)),
+  }).catch((err) => console.warn("回報 web 失敗", err));
+}
+
 /** 每個版本各自的追蹤迴圈：同一時間只有一個追蹤請求，回應後隔 track_interval_ms 再送下一個。 */
 async function trackLoop(track, base, orderId) {
   const interval = state.config.track_interval_ms;
@@ -326,6 +336,7 @@ async function trackLoop(track, base, orderId) {
     if (track.stopped) return;
     const r = await postJSON(base, "/api/track", { order_id: orderId, tracking }, state.config.timeout_ms);
     if (track.stopped) return;
+    reportTrack(track.target, r);
     if (r.outcome !== "ok") {
       failures += 1;
       const reason = { timeout: "逾時", busy: "服務忙碌", error: r.detail.split("（")[0] }[r.outcome];

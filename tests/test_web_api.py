@@ -161,3 +161,15 @@ def test_stream_unsubscribes_on_disconnect(live_server):
     while app.state.broadcaster.subscriber_count:
         assert time.time() < deadline, "subscriber not removed after disconnect"
         time.sleep(0.1)
+
+
+def test_track_report_accepts_readme_example(client, app):
+    body = {"target": "auto", "outcome": "ok", "latency_ms": 18, "instance_id": "00bf4bf0..."}
+    assert client.post("/api/reports/track", json=body).status_code == 200
+    snap = app.state.metrics.snapshot()
+    assert snap["targets"]["auto"]["instances"] == 1
+    assert snap["students"]["orders"] == 0
+
+
+def test_track_report_rejects_malformed(client):
+    assert client.post("/api/reports/track", json={"target": "x", "outcome": "ok", "latency_ms": 1}).status_code == 422

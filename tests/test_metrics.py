@@ -202,3 +202,25 @@ def test_snapshot_defaults_to_clock(metrics, clock):
     metrics.record_order(_student())
     clock.t = T0 + 61
     assert metrics.snapshot()["students"]["orders"] == 0
+
+
+# --- 觀眾追蹤 ---------------------------------------------------------------
+
+
+def test_student_tracks_keep_instance_active_but_not_counted_as_orders(metrics, clock):
+    metrics.record_order(_student(fixed_id="f1", auto_id="a1"))
+    for i in range(1, 30):
+        clock.t = T0 + i
+        metrics.record_track({"target": "auto", "outcome": "ok", "latency_ms": 12, "instance_id": "a1"})
+    snap = metrics.snapshot(clock.t)
+    assert snap["targets"]["auto"]["instances"] == 1  # 下單 29 秒後仍在追蹤，仍算活躍
+    assert snap["targets"]["fixed"]["instances"] == 0
+    assert snap["students"] == {"orders": 1, "fixed_ok": 1, "auto_ok": 1}
+    assert snap["targets"]["auto"]["rps"] == pytest.approx(30 / 60)
+
+
+def test_student_track_failure_counted(metrics, clock):
+    metrics.record_track({"target": "fixed", "outcome": "timeout", "latency_ms": 900, "instance_id": None})
+    t = metrics.snapshot(clock.t)["targets"]["fixed"]
+    assert t["failures"]["timeout"] == 1
+    assert t["p95_ms"] == 15000

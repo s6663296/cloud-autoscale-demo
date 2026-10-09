@@ -168,3 +168,14 @@ test("decorations 對同一張地圖結果固定，且都在地圖範圍內", ()
   assert.ok(a.river.every(([x, y]) => x >= -1 && x <= 60 && y >= -1 && y <= 60));
   assert.notDeepEqual(decorations({ size: 30 }), a);
 });
+
+import { trackReportBody } from "../../web/static/logic.js";
+
+test("trackReportBody 逾時記為 15000 毫秒", () => {
+  assert.deepEqual(trackReportBody("auto", { outcome: "ok", latencyMs: 17.6, instanceId: "00bf" }), {
+    target: "auto", outcome: "ok", latency_ms: 18, instance_id: "00bf",
+  });
+  assert.deepEqual(trackReportBody("fixed", { outcome: "timeout", latencyMs: 15003, instanceId: null }), {
+    target: "fixed", outcome: "timeout", latency_ms: 15000, instance_id: null,
+  });
+});

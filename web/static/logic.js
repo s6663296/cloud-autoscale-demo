@@ -34,19 +34,17 @@ export function outcomeFromStatus(status) {
   return "error";
 }
 
-export function reportBody(orderId, results) {
+export function trackReportBody(target, r) {
   return {
-    order_id: orderId,
-    results: TARGETS.map((target) => {
-      const r = results[target];
-      return {
-        target,
-        outcome: r.outcome,
-        latency_ms: r.outcome === "timeout" ? TIMEOUT_LATENCY_MS : Math.round(r.latencyMs),
-        instance_id: r.instanceId ?? null,
-      };
-    }),
+    target,
+    outcome: r.outcome,
+    latency_ms: r.outcome === "timeout" ? TIMEOUT_LATENCY_MS : Math.round(r.latencyMs),
+    instance_id: r.instanceId ?? null,
   };
+}
+
+export function reportBody(orderId, results) {
+  return { order_id: orderId, results: TARGETS.map((target) => trackReportBody(target, results[target])) };
 }
 
 // --- 外送員動畫 ------------------------------------------------------------

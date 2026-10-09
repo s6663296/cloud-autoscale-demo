@@ -40,13 +40,14 @@ class _Cell:
 
 
 class _Slot:
-    __slots__ = ("sec", "cells", "instances", "student_orders")
+    __slots__ = ("sec", "cells", "instances", "student_orders", "student_ok")
 
     def __init__(self, sec: int):
         self.sec = sec
         self.cells = {(t, s): _Cell() for t in TARGETS for s in SOURCES}
         self.instances: dict[str, set[str]] = {t: set() for t in TARGETS}
         self.student_orders = 0
+        self.student_ok = dict.fromkeys(TARGETS, 0)  # 觀眾下單成功數（不含追蹤）
 
 
 class Metrics:
@@ -59,17 +60,26 @@ class Metrics:
     # --- 寫入 ---------------------------------------------------------------
 
     def record_order(self, results: list[dict]) -> None:
-        """觀眾訂單：一筆訂單在兩個目標的結果。"""
+        """觀眾訂單：一筆訂單在兩個目標的派單結果。"""
         slot = self._current_slot()
         slot.student_orders += 1
         for r in results:
-            target, outcome = r["target"], r["outcome"]
-            cell = slot.cells[(target, "student")]
-            cell.counts[outcome] += 1
-            latency = TIMEOUT_LATENCY_MS if outcome == "timeout" else r["latency_ms"]
-            self._add_samples(cell, [latency])
-            if r.get("instance_id"):
-                slot.instances[target].add(r["instance_id"])
+            self._record_student(slot, r)
+            if r["outcome"] == "ok":
+                slot.student_ok[r["target"]] += 1
+
+    def record_track(self, result: dict) -> None:
+        """觀眾手機的單次追蹤結果：計入目標指標，不計入觀眾訂單數。"""
+        self._record_student(self._current_slot(), result)
+
+    def _record_student(self, slot: "_Slot", r: dict) -> None:
+        target, outcome = r["target"], r["outcome"]
+        cell = slot.cells[(target, "student")]
+        cell.counts[outcome] += 1
+        latency = TIMEOUT_LATENCY_MS if outcome == "timeout" else r["latency_ms"]
+        self._add_samples(cell, [latency])
+        if r.get("instance_id"):
+            slot.instances[target].add(r["instance_id"])
 
     def record_loadtest(self, targets: dict[str, dict]) -> None:
         """壓力測試每秒彙總。"""
@@ -147,8 +157,8 @@ class Metrics:
 
         students = {
             "orders": sum(s.student_orders for s in window),
-            "fixed_ok": sum(s.cells[("fixed", "student")].counts["ok"] for s in window),
-            "auto_ok": sum(s.cells[("auto", "student")].counts["ok"] for s in window),
+            "fixed_ok": sum(s.student_ok["fixed"] for s in window),
+            "auto_ok": sum(s.student_ok["auto"] for s in window),
         }
         return {"now": now_sec, "targets": targets, "students": students, "series": self._series(now_sec)}
 

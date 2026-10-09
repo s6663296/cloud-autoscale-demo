@@ -131,6 +131,11 @@ def create_app() -> FastAPI:
         metrics.record_order([r.model_dump() for r in report.results])
         return {"ok": True}
 
+    @app.post("/api/reports/track")
+    async def report_track(result: OrderResult) -> dict:
+        metrics.record_track(result.model_dump())
+        return {"ok": True}
+
     @app.post("/api/reports/loadtest")
     async def report_loadtest(report: LoadtestReport) -> dict:
         metrics.record_loadtest({t: s.model_dump() for t, s in report.targets.items()})
