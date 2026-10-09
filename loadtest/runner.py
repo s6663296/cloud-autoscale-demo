@@ -10,7 +10,7 @@ import httpx
 
 from loadtest.orders import OrderFactory
 from loadtest.schedule import rate_at, run_schedule
-from loadtest.stats import Aggregator, Window, report_payload, summary_line
+from loadtest.stats import Aggregator, Window, report_payload, summary_line, total_lines
 
 MAX_INFLIGHT = 2000
 REQUEST_TIMEOUT_S = 10.0
@@ -67,6 +67,7 @@ class Session:
         target_transport: httpx.AsyncBaseTransport | None = None,
         web_transport: httpx.AsyncBaseTransport | None = None,
         on_complete: Callable[[str, str], None] | None = None,
+        on_window: Callable[[float, float, dict, dict, dict], None] | None = None,
     ):
         self.targets = {name: url.rstrip("/") for name, url in targets.items()}
         self.web_url = web_url.rstrip("/")
@@ -76,6 +77,7 @@ class Session:
         self.timeout_s = timeout_s
         self.track_interval_s = track_interval_s
         self.on_complete = on_complete
+        self.on_window = on_window  # 有設定時每秒統計交給它，不印 summary_line
         self.rate_fn: Callable[[float], float] = lambda elapsed: 0.0
         self.agg = Aggregator(list(self.targets))
         self.inflight = dict.fromkeys(self.targets, 0)
@@ -199,7 +201,10 @@ class Session:
             total.dropped += w.dropped
             for outcome, n in w.counts.items():
                 total.counts[outcome] += n
-        self.out(summary_line(elapsed, self.rate_fn(elapsed), windows, self.inflight, self.delivering))
+        if self.on_window:
+            self.on_window(elapsed, self.rate_fn(elapsed), windows, dict(self.inflight), dict(self.delivering))
+        else:
+            self.out(summary_line(elapsed, self.rate_fn(elapsed), windows, self.inflight, self.delivering))
         task = asyncio.ensure_future(self._post(report_payload(windows, self.rng)))
         self._reports.add(task)
         task.add_done_callback(self._reports.discard)
@@ -212,11 +217,7 @@ class Session:
             self.out(f"警告：回報 web 失敗（{type(e).__name__}: {e}），壓測繼續")
 
     def total_lines(self) -> list[str]:
-        return [
-            f"{name} 共下單 {w.orders} 請求 {w.sent} 成功 {w.counts['ok']} 逾時 {w.counts['timeout']} "
-            f"忙碌 {w.counts['busy']} 錯誤 {w.counts['error']} 丟棄 {w.dropped} 放棄追蹤 {self.abandoned[name]}"
-            for name, w in self.totals.items()
-        ]
+        return total_lines(self.totals, self.abandoned)
 
 
 async def run_load(
@@ -234,11 +235,17 @@ async def run_load(
     track_interval_s: float = TRACK_INTERVAL_S,
     target_transport: httpx.AsyncBaseTransport | None = None,
     web_transport: httpx.AsyncBaseTransport | None = None,
-) -> None:
-    """新顧客依到達速率出現，兩個目標相同速率、相同訂單內容；每位顧客追蹤到送達。"""
+    on_window: Callable[[float, float, dict, dict, dict], None] | None = None,
+    print_totals: bool = True,
+) -> tuple[dict[str, Window], dict[str, int]]:
+    """新顧客依到達速率出現，兩個目標相同速率、相同訂單內容；每位顧客追蹤到送達。
+
+    回傳各目標的累計統計與放棄追蹤數。
+    """
     session = Session(
         targets, web_url, stop=stop, out=out, max_inflight=max_inflight, timeout_s=timeout_s,
         track_interval_s=track_interval_s, target_transport=target_transport, web_transport=web_transport,
+        on_window=on_window,
     )
     async with session as s:
         s.rate_fn = lambda elapsed: rate_at(elapsed, rate, ramp) if elapsed < duration else 0.0
@@ -246,8 +253,10 @@ async def run_load(
         if not stop.is_set():
             out("排程結束，不再產生新顧客，等待進行中的配送完成…")
             await s.drain()
-    for line in s.total_lines():
-        out(line)
+    if print_totals:
+        for line in s.total_lines():
+            out(line)
+    return s.totals, s.abandoned
 
 
 @dataclass

@@ -23,6 +23,22 @@ class Window:
         return self.counts["timeout"] + self.counts["busy"] + self.counts["error"]
 
 
+def merge_windows(parts: list[dict[str, Window]]) -> dict[str, Window]:
+    """把多個程序同一秒（或同一段期間）的統計合併成一份。"""
+    merged: dict[str, Window] = {}
+    for windows in parts:
+        for name, w in windows.items():
+            m = merged.setdefault(name, Window())
+            m.sent += w.sent
+            m.orders += w.orders
+            m.dropped += w.dropped
+            for outcome, n in w.counts.items():
+                m.counts[outcome] += n
+            m.latencies.extend(w.latencies)
+            m.instance_ids |= w.instance_ids
+    return merged
+
+
 class Aggregator:
     def __init__(self, targets: list[str]):
         self.targets = list(targets)
@@ -85,3 +101,11 @@ def summary_line(
             f"進行中 {inflight.get(name, 0)} 配送中 {delivering.get(name, 0)} p95 {format_ms(p95(w.latencies))}"
         )
     return " | ".join(parts)
+
+
+def total_lines(totals: dict[str, Window], abandoned: dict[str, int]) -> list[str]:
+    return [
+        f"{name} 共下單 {w.orders} 請求 {w.sent} 成功 {w.counts['ok']} 逾時 {w.counts['timeout']} "
+        f"忙碌 {w.counts['busy']} 錯誤 {w.counts['error']} 丟棄 {w.dropped} 放棄追蹤 {abandoned.get(name, 0)}"
+        for name, w in totals.items()
+    ]

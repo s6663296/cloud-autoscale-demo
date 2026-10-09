@@ -11,7 +11,6 @@ import argparse
 import asyncio
 import json
 import random
-import signal
 import sys
 from pathlib import Path
 from typing import Callable
@@ -19,6 +18,7 @@ from typing import Callable
 import httpx
 
 from loadtest.orders import OrderFactory
+from loadtest.parallel import DEFAULT_PROCS, run_parallel, stop_on_signal
 from loadtest.runner import run_load, run_probe
 
 PROBE_SEED = 20261008
@@ -39,6 +39,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     run.add_argument("--rate", type=float, default=60, help="每秒新顧客數（預設 60）")
     run.add_argument("--ramp", type=float, default=60, help="由 0 線性加壓到 --rate 的秒數（預設 60）")
     run.add_argument("--duration", type=float, required=True, help="產生新顧客的總秒數（含加壓）")
+    run.add_argument(
+        "--procs", type=int, default=DEFAULT_PROCS,
+        help=f"施壓的程序數，避免壓測工具本身成為瓶頸（預設 {DEFAULT_PROCS}）",
+    )
 
     probe = sub.add_parser("probe", help="逐步加壓，量測單一 instance 的容量 C")
     probe.add_argument("--report-to", required=True, help="web 網址")
@@ -149,7 +153,7 @@ def _prompt(ask, out, load_saved, save, fetch_config) -> argparse.Namespace | No
         duration = _number(ask, out, "產生新顧客的總秒數", duration_d)
         plan = argparse.Namespace(
             command="run", report_to=web, fixed=config.get("fixed_url"), auto=config.get("auto_url"),
-            rate=rate, ramp=ramp, duration=duration, config=config,
+            rate=rate, ramp=ramp, duration=duration, procs=DEFAULT_PROCS, config=config,
         )
         summary = f"每秒 {rate:g} 位新顧客、加壓 {ramp:g} 秒、持續 {duration:g} 秒（之後等配送完成）"
 
@@ -181,26 +185,12 @@ def fetch_json(web_url: str, path: str) -> dict:
 
 
 async def _main(args: argparse.Namespace, map_json: dict, track_interval_s: float) -> int:
-    loop = asyncio.get_running_loop()
     stop = asyncio.Event()
-
-    def request_stop():
-        print("\n收到中斷，送出最後一筆回報後結束…（再按一次強制結束）", flush=True)
-        stop.set()
-
-    def on_signal(signum, frame):
-        if stop.is_set():
-            raise KeyboardInterrupt
-        loop.call_soon_threadsafe(request_stop)
-
-    # Windows 的 asyncio 不支援 add_signal_handler，改用 signal.signal 轉交給事件迴圈
-    signals = [signal.SIGINT] + ([signal.SIGBREAK] if hasattr(signal, "SIGBREAK") else [])
-    previous = {s: signal.signal(s, on_signal) for s in signals}
-    try:
+    announce = lambda: print("\n收到中斷，送出最後一筆回報後結束…（再按一次強制結束）", flush=True)
+    with stop_on_signal(stop, announce):
         if args.command == "run":
-            targets = {name: url for name, url in (("fixed", args.fixed), ("auto", args.auto)) if url}
             await run_load(
-                targets, args.report_to, rate=args.rate, ramp=args.ramp, duration=args.duration,
+                run_targets(args), args.report_to, rate=args.rate, ramp=args.ramp, duration=args.duration,
                 orders=OrderFactory(map_json, random.Random()), stop=stop, track_interval_s=track_interval_s,
                 out=lambda line: print(line, flush=True),
             )
@@ -212,9 +202,10 @@ async def _main(args: argparse.Namespace, map_json: dict, track_interval_s: floa
             stop=stop, out=lambda line: print(line, flush=True),
         )
         return 0 if capacity is not None else 1
-    finally:
-        for s, handler in previous.items():
-            signal.signal(s, handler)
+
+
+def run_targets(args: argparse.Namespace) -> dict[str, str]:
+    return {name: url for name, url in (("fixed", args.fixed), ("auto", args.auto)) if url}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -242,8 +233,15 @@ def main(argv: list[str] | None = None) -> int:
     except httpx.HTTPError as e:
         print(f"無法從 web 取得地圖：{e}", file=sys.stderr)
         return 1
+    track_interval_s = config.get("track_interval_ms", 2000) / 1000
+    if args.command == "run" and args.procs > 1:
+        return run_parallel(
+            run_targets(args), args.report_to, rate=args.rate, ramp=args.ramp, duration=args.duration,
+            map_json=map_json, track_interval_s=track_interval_s, procs=args.procs,
+            out=lambda line: print(line, flush=True),
+        )
     try:
-        return asyncio.run(_main(args, map_json, config.get("track_interval_ms", 2000) / 1000))
+        return asyncio.run(_main(args, map_json, track_interval_s))
     except KeyboardInterrupt:
         return 130
 

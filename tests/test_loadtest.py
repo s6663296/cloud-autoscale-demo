@@ -1,14 +1,16 @@
 import asyncio
 import json
+import pickle
 import random
 
 import httpx
 import pytest
 
 from loadtest.orders import OrderFactory
+from loadtest.parallel import Merger
 from loadtest.runner import MAX_TRACK_FAILURES, run_load, run_probe, send_request
 from loadtest.schedule import rate_at, run_schedule, send_times
-from loadtest.stats import Aggregator, report_payload
+from loadtest.stats import Aggregator, Window, merge_windows, report_payload
 from shared.citymap import build_city
 
 MAP = build_city(20).to_map_json()
@@ -425,3 +427,56 @@ def test_requests_rotate_across_pool_shards(monkeypatch):
 
     asyncio.run(go())
     assert len(set(used)) == runner.POOL_SHARDS
+
+
+# --- 多程序 -------------------------------------------------------------------
+
+
+def _window(ok=0, timeout=0, latencies=(), ids=(), sent=None, orders=0, dropped=0):
+    w = Window()
+    w.counts["ok"], w.counts["timeout"] = ok, timeout
+    w.latencies = list(latencies)
+    w.instance_ids = set(ids)
+    w.sent = ok + timeout if sent is None else sent
+    w.orders, w.dropped = orders, dropped
+    return w
+
+
+def test_merge_windows_adds_counts_and_unions_instances():
+    merged = merge_windows([
+        {"auto": _window(ok=2, latencies=[10, 20], ids=["a"], orders=1, dropped=1)},
+        {"auto": _window(ok=1, timeout=1, latencies=[30, 10000], ids=["a", "b"], orders=2),
+         "fixed": _window(ok=1, latencies=[5])},
+    ])
+    auto = merged["auto"]
+    assert (auto.counts["ok"], auto.counts["timeout"], auto.sent, auto.orders, auto.dropped) == (3, 1, 4, 3, 1)
+    assert sorted(auto.latencies) == [10, 20, 30, 10000]
+    assert auto.instance_ids == {"a", "b"}
+    assert merged["fixed"].counts["ok"] == 1
+
+
+def test_window_survives_pickle():
+    w = pickle.loads(pickle.dumps(_window(ok=1, latencies=[1.5], ids=["x"])))
+    assert (w.counts["ok"], w.latencies, w.instance_ids) == (1, [1.5], {"x"})
+
+
+def test_merger_prints_once_all_processes_report():
+    lines = []
+    m = Merger(2, lines.append)
+    m.add(1, 1.0, 3.0, {"auto": _window(ok=1)}, {"auto": 2}, {"auto": 1})
+    assert lines == []
+    m.add(1, 1.01, 3.0, {"auto": _window(ok=2)}, {"auto": 3}, {"auto": 4})
+    assert len(lines) == 1
+    assert "新顧客    6.0/s" in lines[0] and "成功 3" in lines[0] and "進行中 5 配送中 5" in lines[0]
+
+
+def test_merger_prints_partial_second_when_a_process_lags():
+    lines = []
+    m = Merger(2, lines.append)
+    m.add(1, 1.0, 1.0, {"auto": _window(ok=1)}, {}, {})
+    m.add(2, 2.0, 1.0, {"auto": _window(ok=1)}, {}, {})
+    assert lines == []
+    m.add(3, 3.0, 1.0, {"auto": _window(ok=1)}, {}, {})
+    assert len(lines) == 1 and "[    1s]" in lines[0]
+    m.flush()
+    assert len(lines) == 3
