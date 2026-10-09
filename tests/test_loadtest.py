@@ -100,7 +100,7 @@ def test_aggregate_counts_and_samples_capped():
         agg.sent("fixed")
         agg.completed("fixed", "ok", float(i), "inst-a" if i % 2 else "inst-b")
     for _ in range(7):
-        agg.completed("fixed", "timeout", 15000, None)
+        agg.completed("fixed", "timeout", 10000, None)
     agg.completed("fixed", "busy", 30, None)
     agg.completed("fixed", "error", 5, None)
     agg.dropped("auto")
@@ -197,7 +197,7 @@ def test_send_request_network_error():
     assert asyncio.run(go()).outcome == "error"
 
 
-def test_send_request_timeout_counts_15000():
+def test_send_request_timeout_counts_10000():
     async def slow(request):
         await asyncio.sleep(1)
         return httpx.Response(200, json={})
@@ -207,7 +207,7 @@ def test_send_request_timeout_counts_15000():
             return await send_request(c, "http://t", "/api/orders", {}, timeout_s=0.05)
 
     r = asyncio.run(go())
-    assert (r.outcome, r.latency_ms, r.instance_id) == ("timeout", 15000, None)
+    assert (r.outcome, r.latency_ms, r.instance_id) == ("timeout", 10000, None)
 
 
 # --- 整合：模擬顧客（MockTransport）----------------------------------------

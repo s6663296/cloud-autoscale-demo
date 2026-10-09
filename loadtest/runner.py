@@ -13,8 +13,8 @@ from loadtest.schedule import rate_at, run_schedule
 from loadtest.stats import Aggregator, Window, report_payload, summary_line
 
 MAX_INFLIGHT = 2000
-REQUEST_TIMEOUT_S = 15.0
-TIMEOUT_LATENCY_MS = 15000
+REQUEST_TIMEOUT_S = 10.0
+TIMEOUT_LATENCY_MS = 10000
 REPORT_TIMEOUT_S = 3.0
 TRACK_INTERVAL_S = 2.0
 MAX_TRACK_FAILURES = 5  # 連續失敗這麼多次就放棄追蹤，像真實顧客關掉 App

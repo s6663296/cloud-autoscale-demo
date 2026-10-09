@@ -4,7 +4,7 @@ import pytest
 
 from loadtest.__main__ import parse_args, prompt_plan, resolve_targets
 
-CONFIG = {"fixed_url": "http://f", "auto_url": "http://a", "timeout_ms": 15000, "track_interval_ms": 2000}
+CONFIG = {"fixed_url": "http://f", "auto_url": "http://a", "timeout_ms": 10000, "track_interval_ms": 2000}
 
 
 class Prompts:

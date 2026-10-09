@@ -18,7 +18,7 @@ WINDOW_S = 60
 INSTANCE_WINDOW_S = 10
 SERIES_STEP_S = 10
 MAX_SAMPLES = 200
-TIMEOUT_LATENCY_MS = 15000
+TIMEOUT_LATENCY_MS = 10000
 
 
 def percentile(samples: list[float], p: float) -> float | None:

@@ -60,7 +60,7 @@ test("outcomeFromStatus 依 README 分類", () => {
   assert.equal(outcomeFromStatus(422), "error");
 });
 
-test("reportBody 逾時記為 15000 毫秒，延遲取整數", () => {
+test("reportBody 逾時記為 10000 毫秒，延遲取整數", () => {
   const body = reportBody("id-1", {
     fixed: { outcome: "timeout", latencyMs: 50.2, instanceId: null },
     auto: { outcome: "ok", latencyMs: 411.6, instanceId: "00bf" },
@@ -68,7 +68,7 @@ test("reportBody 逾時記為 15000 毫秒，延遲取整數", () => {
   assert.deepEqual(body, {
     order_id: "id-1",
     results: [
-      { target: "fixed", outcome: "timeout", latency_ms: 15000, instance_id: null },
+      { target: "fixed", outcome: "timeout", latency_ms: 10000, instance_id: null },
       { target: "auto", outcome: "ok", latency_ms: 412, instance_id: "00bf" },
     ],
   });
@@ -171,11 +171,11 @@ test("decorations 對同一張地圖結果固定，且都在地圖範圍內", ()
 
 import { trackReportBody } from "../../web/static/logic.js";
 
-test("trackReportBody 逾時記為 15000 毫秒", () => {
+test("trackReportBody 逾時記為 10000 毫秒", () => {
   assert.deepEqual(trackReportBody("auto", { outcome: "ok", latencyMs: 17.6, instanceId: "00bf" }), {
     target: "auto", outcome: "ok", latency_ms: 18, instance_id: "00bf",
   });
   assert.deepEqual(trackReportBody("fixed", { outcome: "timeout", latencyMs: 15003, instanceId: null }), {
-    target: "fixed", outcome: "timeout", latency_ms: 15000, instance_id: null,
+    target: "fixed", outcome: "timeout", latency_ms: 10000, instance_id: null,
   });
 });

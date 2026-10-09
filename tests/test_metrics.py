@@ -126,9 +126,9 @@ def test_students_only_count_order_reports(metrics, clock):
     assert metrics.snapshot(T0 + 60)["students"] == {"orders": 0, "fixed_ok": 0, "auto_ok": 0}
 
 
-def test_student_timeout_counted_as_15000ms(metrics, clock):
+def test_student_timeout_counted_as_10000ms(metrics, clock):
     metrics.record_order([{"target": "fixed", "outcome": "timeout", "latency_ms": 50, "instance_id": None}])
-    assert metrics.snapshot(clock.t)["targets"]["fixed"]["p95_ms"] == 15000
+    assert metrics.snapshot(clock.t)["targets"]["fixed"]["p95_ms"] == 10000
 
 
 # --- 樣本上限 ---------------------------------------------------------------
@@ -159,13 +159,13 @@ def test_series_has_60_points_with_nulls(metrics, clock):
 def test_series_aggregates_10s_buckets(metrics, clock):
     clock.t = T0 - T0 % 10 - 100  # 某個 10 秒區間的開頭
     start = int(clock.t)
-    metrics.record_loadtest(_lt(fixed={"ok": 1, "timeout": 1, "latency_samples_ms": [100, 15000]}))
+    metrics.record_loadtest(_lt(fixed={"ok": 1, "timeout": 1, "latency_samples_ms": [100, 10000]}))
     clock.t += 9
     metrics.record_loadtest(_lt(fixed={"ok": 2, "latency_samples_ms": [200, 300]}))
     series = metrics.snapshot(start + 100)["series"]
     point = next(p for p in series if p["t"] == start)
     assert point["fixed"]["success_rate"] == 0.75
-    assert point["fixed"]["p95_ms"] == 15000
+    assert point["fixed"]["p95_ms"] == 10000
     assert point["auto"] == {"success_rate": None, "p95_ms": None}
     later = next(p for p in series if p["t"] == start + 10)
     assert later["fixed"]["success_rate"] is None
@@ -223,4 +223,4 @@ def test_student_track_failure_counted(metrics, clock):
     metrics.record_track({"target": "fixed", "outcome": "timeout", "latency_ms": 900, "instance_id": None})
     t = metrics.snapshot(clock.t)["targets"]["fixed"]
     assert t["failures"]["timeout"] == 1
-    assert t["p95_ms"] == 15000
+    assert t["p95_ms"] == 10000

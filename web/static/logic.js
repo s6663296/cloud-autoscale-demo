@@ -1,7 +1,7 @@
 // 前端的純邏輯：不碰 DOM，供 app.js / map.js / dashboard.js 使用，並以 node --test 測試。
 
 export const TARGETS = ["fixed", "auto"];
-export const TIMEOUT_LATENCY_MS = 15000;
+export const TIMEOUT_LATENCY_MS = 10000;
 
 const round1 = (n) => Math.round(n * 10) / 10;
 

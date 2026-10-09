@@ -15,7 +15,7 @@ from shared.citymap import get_city
 ORDER_REPORT = {
     "order_id": "uuid",
     "results": [
-        {"target": "fixed", "outcome": "timeout", "latency_ms": 15000, "instance_id": None},
+        {"target": "fixed", "outcome": "timeout", "latency_ms": 10000, "instance_id": None},
         {"target": "auto", "outcome": "ok", "latency_ms": 412, "instance_id": "00bf4bf0..."},
     ],
 }
@@ -24,7 +24,7 @@ LOADTEST_REPORT = {
     "targets": {
         "fixed": {
             "ok": 8, "timeout": 52, "busy": 0, "error": 0,
-            "latency_samples_ms": [15000, 14873],
+            "latency_samples_ms": [10000, 9873],
             "instance_ids": ["00a1..."],
         },
         "auto": {"ok": 60, "timeout": 0, "busy": 0, "error": 0, "latency_samples_ms": [388], "instance_ids": ["00bf...", "00c2..."]},

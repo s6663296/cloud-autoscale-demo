@@ -201,7 +201,7 @@ flowchart LR
 {
   "order_id": "uuid",
   "results": [
-    { "target": "fixed", "outcome": "timeout", "latency_ms": 15000, "instance_id": null },
+    { "target": "fixed", "outcome": "timeout", "latency_ms": 10000, "instance_id": null },
     { "target": "auto", "outcome": "ok", "latency_ms": 412, "instance_id": "00bf4bf0..." }
   ]
 }
@@ -220,7 +220,7 @@ flowchart LR
   "targets": {
     "fixed": {
       "ok": 8, "timeout": 52, "busy": 0, "error": 0,
-      "latency_samples_ms": [15000, 14873],
+      "latency_samples_ms": [10000, 9873],
       "instance_ids": ["00a1..."]
     },
     "auto": { "ok": 60, "timeout": 0, "busy": 0, "error": 0, "latency_samples_ms": [388], "instance_ids": ["00bf...", "00c2..."] }
@@ -232,8 +232,8 @@ flowchart LR
 
 | 值 | 條件 |
 |---|---|
-| `ok` | 15 秒內收到 HTTP 200 |
-| `timeout` | 超過 15 秒未完成，`latency_ms` 記為 15000 |
+| `ok` | 10 秒內收到 HTTP 200 |
+| `timeout` | 超過 10 秒未完成，`latency_ms` 記為 10000 |
 | `busy` | HTTP 429 |
 | `error` | 其他 HTTP 狀態碼或網路錯誤 |
 
@@ -245,7 +245,7 @@ flowchart LR
   "targets": {
     "fixed": {
       "instances": 1, "rps": 9.8, "success_rate": 0.13,
-      "p50_ms": 15000, "p95_ms": 15000,
+      "p50_ms": 10000, "p95_ms": 10000,
       "failures": { "timeout": 3100, "busy": 0, "error": 0 }
     },
     "auto": { "instances": 7, "rps": 60.2, "success_rate": 1.0, "p50_ms": 380, "p95_ms": 920, "failures": { "timeout": 0, "busy": 0, "error": 0 } }
@@ -266,7 +266,7 @@ flowchart LR
 | 活躍執行個體數 | 最近 10 秒內曾處理請求的不同 `instance_id` 數量 |
 | RPS | 最近 60 秒完成的請求數 ÷ 60（觀眾與壓力測試的下單、追蹤合計） |
 | 成功率 | 最近 60 秒 `ok` ÷ 完成數 |
-| p50 / p95 延遲 | 最近 60 秒延遲樣本的分位數，逾時以 15000 毫秒計 |
+| p50 / p95 延遲 | 最近 60 秒延遲樣本的分位數，逾時以 10000 毫秒計 |
 | 失敗分類 | 最近 60 秒 `timeout`、`busy`、`error` 各自計數 |
 | 觀眾訂單 | 最近 60 秒觀眾下單數，以及兩個版本各自成功數 |
 | 趨勢圖 | 最近 10 分鐘，每 10 秒一點，繪製成功率與 p95 延遲 |
@@ -326,7 +326,7 @@ python -m loadtest probe --report-to <WEB_URL>
 | `TIME_SCALE` | dispatch | 40 | 模擬時間倍率（模擬秒數 ÷ 真實秒數） |
 | `ALLOWED_ORIGIN` | dispatch | — | `web` 的網址（CORS），多個以逗號分隔 |
 | `FIXED_URL` / `AUTO_URL` | web | — | 兩個 dispatch 服務的網址 |
-| `TIMEOUT_MS` | web | 15000 | 前端逾時 |
+| `TIMEOUT_MS` | web | 10000 | 前端逾時 |
 | `TRACK_INTERVAL_MS` | web | 2000 | 手機與壓力測試的追蹤間隔 |
 
 ## 9. 目錄結構
