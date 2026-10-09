@@ -287,7 +287,9 @@ ALLOWED_ORIGIN=http://localhost:8000,http://127.0.0.1:8000 .venv/Scripts/python 
 FIXED_URL=http://localhost:8001 AUTO_URL=http://localhost:8001 .venv/Scripts/python -m uvicorn hub.main:app --port 8000
 ```
 
-Windows cmd（兩個視窗各執行一組）：
+Windows 最簡單的方式：雙擊專案根目錄的 `run_local.bat`，會開三個視窗（固定版 8001、擴展版 8002 以 4 個 worker 模擬擴展、hub 8000）並開啟瀏覽器。
+
+Windows cmd 手動啟動（兩個視窗各執行一組）：
 
 ```cmd
 set ALLOWED_ORIGIN=http://localhost:8000,http://127.0.0.1:8000
