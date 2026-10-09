@@ -25,3 +25,5 @@ class Params:
 
 
 PARAMS = Params.from_env()
+SERVICE = os.environ.get("K_SERVICE", "local")
+ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "")

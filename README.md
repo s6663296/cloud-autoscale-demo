@@ -270,12 +270,12 @@ Dockerfile   共用映像檔
 
 ## 10. 本機開發
 
-需求：Python 3.12。
+需求：Python 3.10 以上（容器映像檔使用 3.12）。
 
 ```bash
 pip install -r requirements.txt
 pytest
-APP=dispatch uvicorn dispatch.main:app --port 8001
+APP=dispatch ALLOWED_ORIGIN=http://localhost:8000 uvicorn dispatch.main:app --port 8001
 APP=hub FIXED_URL=http://localhost:8001 AUTO_URL=http://localhost:8001 uvicorn hub.main:app --port 8000
 ```
 
