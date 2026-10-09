@@ -35,7 +35,7 @@ flowchart LR
     LT[壓力測試腳本<br/>另一台電腦]
     Web[web<br/>固定 1 台]
     Fixed[dispatch-fixed<br/>固定 1 台]
-    Auto[dispatch-auto<br/>自動擴展，上限 10 台]
+    Auto[dispatch-auto<br/>自動擴展，上限 8 台]
 
     Phone -- 取得頁面、地圖、設定 --> Web
     Phone -- 下單、每 2 秒追蹤 --> Fixed
@@ -50,7 +50,7 @@ flowchart LR
 | 元件 | 部署 | 擴展設定 | 職責 |
 |---|---|---|---|
 | `dispatch-fixed` | Cloud Run | max 1 | 派單與配送追蹤運算（對照組） |
-| `dispatch-auto` | Cloud Run | max 10 | 派單與配送追蹤運算（實驗組） |
+| `dispatch-auto` | Cloud Run | max 8 | 派單與配送追蹤運算（實驗組） |
 | `web` | Cloud Run | max 1 | 提供點餐頁、地圖與設定；收集回報；以 SSE 推送 Debug 指標 |
 | 前端 | 觀眾手機瀏覽器 | — | 點餐、追蹤配送、Debug 儀表板 |
 | `loadtest` | 另一台電腦 | — | 模擬大量顧客：以固定到達速率下單，並追蹤各自的配送直到送達；每秒回報 web |
@@ -284,7 +284,7 @@ python -m loadtest run --report-to <WEB_URL> --rate 60 --ramp 60 --duration 300
 python -m loadtest probe --report-to <WEB_URL>
 ```
 
-互動模式的預設速率：本機每秒 8 位新顧客、加壓 20 秒、持續 120 秒（本機固定版只有 1 個程序，擴展版以 4 個 worker 模擬擴展，此速率會讓固定版過載而擴展版撐得住）；雲端沿用上方預設，P8 校準後更新。
+互動模式的預設速率：本機每秒 8 位新顧客、加壓 20 秒、持續 120 秒（本機固定版只有 1 個程序，擴展版以 8 個 worker 模擬擴展到上限，此速率會讓固定版過載而擴展版撐得住）；雲端沿用上方預設，P8 校準後更新。
 
 - **模擬顧客**：每位模擬顧客下單成功後，每隔 `track_interval_ms`（取自 web 的 `/api/config`）追蹤一次，直到送達；與觀眾手機的行為相同。
 - **開放式負載**：新顧客依固定到達速率出現，不等待先前顧客完成，模擬顧客持續下單。封閉式負載會因目標變慢而自動降速，掩蓋固定容量版的瓶頸，故不採用。同一位顧客的追蹤請求一次只有一個，回應後才排定下一次。
@@ -302,7 +302,7 @@ python -m loadtest probe --report-to <WEB_URL>
 | 服務 | CPU / 記憶體 | concurrency | timeout | max-instances |
 |---|---|---|---|---|
 | `dispatch-fixed` | 1 / 512Mi | 4 | 30s | 1 |
-| `dispatch-auto` | 1 / 512Mi | 4 | 30s | 10（依校準結果調整） |
+| `dispatch-auto` | 1 / 512Mi | 4 | 30s | 8 |
 | `web` | 1 / 512Mi | 250 | 3600s | 1 |
 
 三個服務的 min-instances 平時為 0，展示前調整為 1，以避免冷啟動。
@@ -362,7 +362,7 @@ ALLOWED_ORIGIN=http://localhost:8000,http://127.0.0.1:8000 .venv/Scripts/python 
 FIXED_URL=http://localhost:8001 AUTO_URL=http://localhost:8001 .venv/Scripts/python -m uvicorn web.main:app --port 8000
 ```
 
-Windows 最簡單的方式：雙擊專案根目錄的 `run_local.bat`，會開三個視窗（固定版 8001、擴展版 8002 以 4 個 worker 模擬擴展、web 8000）並開啟瀏覽器。
+Windows 最簡單的方式：雙擊專案根目錄的 `run_local.bat`，會開三個視窗（固定版 8001、擴展版 8002 以 8 個 worker 模擬擴展到上限、web 8000）並開啟瀏覽器。
 
 Windows cmd 手動啟動（兩個視窗各執行一組）：
 
