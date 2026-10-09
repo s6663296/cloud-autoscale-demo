@@ -29,4 +29,4 @@ class Params:
 PARAMS = Params.from_env()
 SERVICE = os.environ.get("K_SERVICE", "local")
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "")
-TIME_SCALE = float(os.environ.get("TIME_SCALE", "40"))
+TIME_SCALE = float(os.environ.get("TIME_SCALE", "20"))
