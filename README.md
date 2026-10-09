@@ -272,11 +272,40 @@ Dockerfile   共用映像檔
 
 需求：Python 3.10 以上（容器映像檔使用 3.12）。
 
+本機直接以 uvicorn 啟動，不需要 Docker；`APP` 只供容器判斷要啟動哪個服務。
+
 ```bash
-pip install -r requirements.txt
-pytest
-APP=dispatch ALLOWED_ORIGIN=http://localhost:8000 uvicorn dispatch.main:app --port 8001
-APP=hub FIXED_URL=http://localhost:8001 AUTO_URL=http://localhost:8001 uvicorn hub.main:app --port 8000
+python -m venv .venv
+.venv/Scripts/pip install -r requirements.txt    # macOS / Linux：.venv/bin/pip
+.venv/Scripts/python -m pytest
+```
+
+bash：
+
+```bash
+ALLOWED_ORIGIN=http://localhost:8000 .venv/Scripts/python -m uvicorn dispatch.main:app --port 8001
+FIXED_URL=http://localhost:8001 AUTO_URL=http://localhost:8001 .venv/Scripts/python -m uvicorn hub.main:app --port 8000
+```
+
+Windows cmd（兩個視窗各執行一組）：
+
+```cmd
+set ALLOWED_ORIGIN=http://localhost:8000
+.venv\Scripts\python -m uvicorn dispatch.main:app --port 8001
+
+set FIXED_URL=http://localhost:8001
+set AUTO_URL=http://localhost:8001
+.venv\Scripts\python -m uvicorn hub.main:app --port 8000
+```
+
+PowerShell：
+
+```powershell
+$env:ALLOWED_ORIGIN = "http://localhost:8000"
+.venv\Scripts\python -m uvicorn dispatch.main:app --port 8001
+
+$env:FIXED_URL = "http://localhost:8001"; $env:AUTO_URL = "http://localhost:8001"
+.venv\Scripts\python -m uvicorn hub.main:app --port 8000
 ```
 
 ## 11. 已知限制
