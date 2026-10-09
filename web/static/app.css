@@ -281,7 +281,9 @@ button:disabled { cursor: default; }
 .progress.searching span:first-child::after { width: 40%; animation: search 1.2s ease-in-out infinite alternate; }
 @keyframes search { from { transform: translateX(-60%); } to { transform: translateX(160%); } }
 .status-text { font-size: 15px; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 1.5em; font-variant-numeric: tabular-nums; }
-.status-meta { margin-top: 6px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.status-meta, .track-meta { margin-top: 6px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.track-meta { margin-top: 2px; }
+.track-meta.stale { color: var(--critical); font-weight: 600; }
 
 .spinner {
   width: 16px;
@@ -311,8 +313,8 @@ button:disabled { cursor: default; }
 .map .arterial-edge { fill: none; stroke: var(--map-arterial-edge); stroke-width: 9; stroke-linecap: round; }
 .map .arterial { fill: none; stroke: var(--map-arterial); stroke-width: 7; stroke-linecap: round; }
 .map .road-label { fill: var(--map-label); paint-order: stroke; stroke: #fff; stroke-linejoin: round; font-weight: 600; }
-.map .route-to-restaurant { fill: none; stroke: var(--brand); stroke-opacity: 0.6; stroke-width: 4; stroke-dasharray: 1 7; stroke-linecap: round; stroke-linejoin: round; }
-.map .route-to-customer { fill: none; stroke: var(--brand); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+.map .route-upcoming { fill: none; stroke: var(--brand); stroke-opacity: 0.55; stroke-width: 4; stroke-dasharray: 1 7; stroke-linecap: round; stroke-linejoin: round; }
+.map .route-current { fill: none; stroke: var(--brand); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
 .map .pin-restaurant { fill: var(--brand); }
 .map .pin-customer { fill: #2b2b2b; }
 .map .pin-ring { fill: var(--brand); opacity: 0.22; }

@@ -1,10 +1,11 @@
 // 點餐流程：首頁 → 店家 → 結帳 → 追蹤。
 // 下單時平行呼叫兩個派單服務，各自逾時；兩邊結束後回報 web，才允許再點一單。
+// 派單成功後，每個版本各自向自己的後端追蹤外送員位置，直到送達。
 
 import { initDashboard } from "./dashboard.js";
 import {
   buildOrderBody, cartLines, cartSummary, etaText, formatMs, makeOrderId,
-  outcomeFromStatus, reportBody, TARGETS, trackingProgress,
+  outcomeFromStatus, progressFromTrack, reportBody, TARGETS,
 } from "./logic.js";
 import { CityMapView } from "./map.js";
 
@@ -30,6 +31,7 @@ const STEP_TEXT = [
 ];
 
 const $ = (sel) => document.querySelector(sel);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const look = (r) => LOOKS[r.id] || DEFAULT_LOOK;
 
 const state = {
@@ -200,13 +202,13 @@ function renderCheckout() {
 
 // --- 呼叫派單服務 ----------------------------------------------------------
 
-async function callTarget(url, body, timeoutMs) {
-  if (!url) return { outcome: "error", detail: "未設定服務網址", latencyMs: 0, instanceId: null };
+async function postJSON(base, path, body, timeoutMs) {
+  if (!base) return { outcome: "error", detail: "未設定服務網址", latencyMs: 0, instanceId: null };
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   const start = performance.now();
   try {
-    const res = await fetch(`${url.replace(/\/$/, "")}/api/orders`, {
+    const res = await fetch(`${base.replace(/\/$/, "")}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -231,8 +233,15 @@ async function callTarget(url, body, timeoutMs) {
 
 // --- 追蹤頁：每個版本一個區塊，各有自己的地圖與動畫時鐘 -------------------
 
+function stopTracks() {
+  for (const t of Object.values(state.tracks)) {
+    t.stopped = true;
+    t.view.stop();
+  }
+}
+
 function createTracks() {
-  for (const t of Object.values(state.tracks)) t.view.stop();
+  stopTracks();
   const template = $("#track-template");
   const box = $("#tracks");
   box.replaceChildren();
@@ -251,12 +260,12 @@ function createTracks() {
       progress: node.querySelector(".progress"),
       status: node.querySelector(".status-text"),
       meta: node.querySelector(".status-meta"),
+      trackMeta: node.querySelector(".track-meta"),
       rider: node.querySelector(".rider-card"),
       result: null,
+      stopped: false,
     };
-    track.view = new CityMapView(node.querySelector(".map"), state.map, {
-      onFrame: (t) => updateProgress(track, t),
-    });
+    track.view = new CityMapView(node.querySelector(".map"), state.map);
     state.tracks[target] = track;
   }
 }
@@ -278,7 +287,12 @@ function setWaiting(track) {
   track.waitText = html("span", "已等待 0.0 秒");
   track.status.replaceChildren(html("span", undefined, "spinner"), track.waitText);
   track.meta.textContent = "";
+  track.trackMeta.textContent = "";
   track.rider.hidden = true;
+}
+
+function shortId(id) {
+  return id.length > 14 ? `${id.slice(0, 14)}…` : id;
 }
 
 function setSuccess(track, r) {
@@ -289,17 +303,45 @@ function setSuccess(track, r) {
   track.progress.className = "progress";
   track.rider.hidden = false;
   track.rider.querySelector(".rider-name").textContent = d.rider.name;
-  const id = d.instance_id.length > 14 ? `${d.instance_id.slice(0, 14)}…` : d.instance_id;
-  track.meta.textContent = `派單回應 ${formatMs(r.latencyMs)} · 運算 ${d.compute_ms} ms · 執行個體 ${id}`;
+  track.meta.textContent = `派單回應 ${formatMs(r.latencyMs)} · 運算 ${d.compute_ms} ms · 執行個體 ${shortId(d.instance_id)}`;
+  track.trackMeta.textContent = "等待後端回報外送員位置…";
   track.view.showResult(d);
+  showProgress(track, "to_restaurant", 0, d.schedule.deliver_s);
 }
 
-function updateProgress(track, t) {
-  const { schedule } = track.result;
-  const p = trackingProgress(schedule, t);
+function showProgress(track, phase, simS, etaS) {
+  const p = progressFromTrack(phase, simS, etaS, track.result.schedule);
   setSegments(track, p.step, p.frac);
-  track.eta.textContent = etaText(schedule.deliver_s, t);
+  track.eta.textContent = etaText(simS + etaS, simS);
   track.status.textContent = STEP_TEXT[p.step];
+}
+
+/** 每個版本各自的追蹤迴圈：同一時間只有一個追蹤請求，回應後隔 track_interval_ms 再送下一個。 */
+async function trackLoop(track, base, orderId) {
+  const interval = state.config.track_interval_ms;
+  let tracking = track.result.tracking;
+  let failures = 0;
+  while (!track.stopped) {
+    await sleep(interval);
+    if (track.stopped) return;
+    const r = await postJSON(base, "/api/track", { order_id: orderId, tracking }, state.config.timeout_ms);
+    if (track.stopped) return;
+    if (r.outcome !== "ok") {
+      failures += 1;
+      const reason = { timeout: "逾時", busy: "服務忙碌", error: r.detail.split("（")[0] }[r.outcome];
+      track.trackMeta.textContent = `⚠ 位置更新延遲（${reason}），已重試 ${failures} 次`;
+      track.trackMeta.className = "track-meta stale";
+      continue;
+    }
+    failures = 0;
+    const d = r.data;
+    tracking = d.tracking;
+    track.view.applyTrack(d, interval);
+    showProgress(track, d.phase, d.sim_s, d.eta_s);
+    track.trackMeta.className = "track-meta muted";
+    track.trackMeta.textContent = `位置更新 ${formatMs(r.latencyMs)} · 運算 ${d.compute_ms} ms · 執行個體 ${shortId(d.instance_id)}`;
+    if (d.phase === "delivered") return;
+  }
 }
 
 function setFailed(track, r) {
@@ -352,10 +394,15 @@ async function placeOrder() {
 
   const urls = { fixed: state.config.fixed_url, auto: state.config.auto_url };
   await Promise.all(TARGETS.map(async (t) => {
-    const res = await callTarget(urls[t], body, state.config.timeout_ms);
+    const res = await postJSON(urls[t], "/api/orders", body, state.config.timeout_ms);
     results[t] = res;
-    if (res.outcome === "ok") setSuccess(state.tracks[t], res);
-    else setFailed(state.tracks[t], res);
+    const track = state.tracks[t];
+    if (res.outcome === "ok") {
+      setSuccess(track, res);
+      trackLoop(track, urls[t], orderId);
+    } else {
+      setFailed(track, res);
+    }
   }));
   clearInterval(ticker);
 
@@ -376,7 +423,7 @@ async function placeOrder() {
 }
 
 function orderAgain() {
-  for (const t of Object.values(state.tracks)) t.view.stop();
+  stopTracks();
   state.qty = {};
   state.restaurant = null;
   $("#customer-form").reset();

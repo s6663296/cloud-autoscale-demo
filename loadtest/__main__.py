@@ -44,13 +44,13 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     return args
 
 
-def fetch_map(web_url: str) -> dict:
-    res = httpx.get(f"{web_url.rstrip('/')}/api/map", timeout=10)
+def fetch_json(web_url: str, path: str) -> dict:
+    res = httpx.get(f"{web_url.rstrip('/')}{path}", timeout=10)
     res.raise_for_status()
     return res.json()
 
 
-async def _main(args: argparse.Namespace, map_json: dict) -> int:
+async def _main(args: argparse.Namespace, map_json: dict, track_interval_s: float) -> int:
     loop = asyncio.get_running_loop()
     stop = asyncio.Event()
 
@@ -71,13 +71,14 @@ async def _main(args: argparse.Namespace, map_json: dict) -> int:
             targets = {name: url for name, url in (("fixed", args.fixed), ("auto", args.auto)) if url}
             await run_load(
                 targets, args.report_to, rate=args.rate, ramp=args.ramp, duration=args.duration,
-                orders=OrderFactory(map_json, random.Random()), stop=stop,
+                orders=OrderFactory(map_json, random.Random()), stop=stop, track_interval_s=track_interval_s,
                 out=lambda line: print(line, flush=True),
             )
             return 0
         capacity = await run_probe(
             args.target, args.report_to, name=args.name, step_s=args.step, threshold=args.threshold,
             max_rate=args.max_rate, orders=OrderFactory(map_json, random.Random(PROBE_SEED), seed=PROBE_SEED),
+            track_interval_s=track_interval_s,
             stop=stop, out=lambda line: print(line, flush=True),
         )
         return 0 if capacity is not None else 1
@@ -91,12 +92,13 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(errors="replace")
     args = parse_args(argv)
     try:
-        map_json = fetch_map(args.report_to)
+        map_json = fetch_json(args.report_to, "/api/map")
+        track_interval_s = fetch_json(args.report_to, "/api/config").get("track_interval_ms", 2000) / 1000
     except httpx.HTTPError as e:
-        print(f"無法從 web 取得 /api/map：{e}", file=sys.stderr)
+        print(f"無法從 web 取得地圖或設定：{e}", file=sys.stderr)
         return 1
     try:
-        return asyncio.run(_main(args, map_json))
+        return asyncio.run(_main(args, map_json, track_interval_s))
     except KeyboardInterrupt:
         return 130
 

@@ -8,10 +8,11 @@ MAX_SAMPLES = 200
 
 
 class Window:
-    __slots__ = ("sent", "dropped", "counts", "latencies", "instance_ids")
+    __slots__ = ("sent", "orders", "dropped", "counts", "latencies", "instance_ids")
 
     def __init__(self):
-        self.sent = 0
+        self.sent = 0  # 送出的請求（下單與追蹤）
+        self.orders = 0  # 其中的下單請求
         self.dropped = 0
         self.counts = dict.fromkeys(OUTCOMES, 0)
         self.latencies: list[float] = []
@@ -27,8 +28,11 @@ class Aggregator:
         self.targets = list(targets)
         self._windows = {t: Window() for t in self.targets}
 
-    def sent(self, target: str) -> None:
-        self._windows[target].sent += 1
+    def sent(self, target: str, order: bool = False) -> None:
+        w = self._windows[target]
+        w.sent += 1
+        if order:
+            w.orders += 1
 
     def dropped(self, target: str) -> None:
         self._windows[target].dropped += 1
@@ -71,11 +75,13 @@ def format_ms(ms: float | None) -> str:
     return f"{ms:.0f}ms" if ms < 1000 else f"{ms / 1000:.1f}s"
 
 
-def summary_line(elapsed: float, rate: float, windows: dict[str, Window], inflight: dict[str, int]) -> str:
-    parts = [f"[{elapsed:5.0f}s] 速率 {rate:6.1f}/s"]
+def summary_line(
+    elapsed: float, rate: float, windows: dict[str, Window], inflight: dict[str, int], delivering: dict[str, int]
+) -> str:
+    parts = [f"[{elapsed:5.0f}s] 新顧客 {rate:6.1f}/s"]
     for name, w in windows.items():
         parts.append(
-            f"{name} 送出 {w.sent} 成功 {w.counts['ok']} 失敗 {w.failed} 丟棄 {w.dropped} "
-            f"進行中 {inflight.get(name, 0)} p95 {format_ms(p95(w.latencies))}"
+            f"{name} 下單 {w.orders} 請求 {w.sent} 成功 {w.counts['ok']} 失敗 {w.failed} 丟棄 {w.dropped} "
+            f"進行中 {inflight.get(name, 0)} 配送中 {delivering.get(name, 0)} p95 {format_ms(p95(w.latencies))}"
         )
     return " | ".join(parts)

@@ -101,7 +101,12 @@ def create_app() -> FastAPI:
     metrics = Metrics()
     broadcaster = Broadcaster()
     map_body = json.dumps(get_city().to_map_json(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    settings = {"fixed_url": config.FIXED_URL, "auto_url": config.AUTO_URL, "timeout_ms": config.TIMEOUT_MS}
+    settings = {
+        "fixed_url": config.FIXED_URL,
+        "auto_url": config.AUTO_URL,
+        "timeout_ms": config.TIMEOUT_MS,
+        "track_interval_ms": config.TRACK_INTERVAL_MS,
+    }
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

@@ -10,48 +10,8 @@ import {
   makeOrderId,
   outcomeFromStatus,
   reportBody,
-  riderPosition,
   roadPaths,
-  simSeconds,
 } from "../../web/static/logic.js";
-
-// --- 外送員位置 ------------------------------------------------------------
-
-const route = {
-  to_restaurant: [[0, 0], [1, 0], [2, 0]],
-  to_customer: [[2, 0], [2, 1], [2, 2], [2, 3], [2, 4]],
-};
-const schedule = { arrive_restaurant_s: 100, pickup_s: 300, deliver_s: 700 };
-
-test("riderPosition 依序經過店家與顧客", () => {
-  assert.deepEqual(riderPosition(route, schedule, 0), { x: 0, y: 0, phase: "to_restaurant" });
-  assert.deepEqual(riderPosition(route, schedule, 50), { x: 1, y: 0, phase: "to_restaurant" });
-  assert.deepEqual(riderPosition(route, schedule, 100), { x: 2, y: 0, phase: "waiting" });
-  assert.deepEqual(riderPosition(route, schedule, 200), { x: 2, y: 0, phase: "waiting" });
-  assert.deepEqual(riderPosition(route, schedule, 500), { x: 2, y: 2, phase: "to_customer" });
-  assert.deepEqual(riderPosition(route, schedule, 700), { x: 2, y: 4, phase: "delivered" });
-  assert.deepEqual(riderPosition(route, schedule, 9999), { x: 2, y: 4, phase: "delivered" });
-});
-
-test("riderPosition 在路段中間做線性內插", () => {
-  const p = riderPosition(route, schedule, 25);
-  assert.equal(p.x, 0.5);
-  assert.equal(p.y, 0);
-});
-
-test("riderPosition 外送員就在店家、不需等待", () => {
-  const r = { to_restaurant: [[2, 0]], to_customer: [[2, 0], [2, 1]] };
-  const s = { arrive_restaurant_s: 0, pickup_s: 0, deliver_s: 60 };
-  assert.deepEqual(riderPosition(r, s, 0), { x: 2, y: 0, phase: "to_customer" });
-  assert.deepEqual(riderPosition(r, s, 30), { x: 2, y: 0.5, phase: "to_customer" });
-});
-
-test("simSeconds 把整趟壓縮成 30 秒播放", () => {
-  assert.equal(simSeconds(0, 1200), 0);
-  assert.equal(simSeconds(15000, 1200), 600);
-  assert.equal(simSeconds(30000, 1200), 1200);
-  assert.equal(simSeconds(45000, 1200), 1200);
-});
 
 // --- 地圖 ------------------------------------------------------------------
 
@@ -140,7 +100,7 @@ test("formatPct 與 formatMs", () => {
 
 // --- 購物車 ----------------------------------------------------------------
 
-import { cartLines, cartSummary, decorations, etaText, trackingProgress } from "../../web/static/logic.js";
+import { cartLines, cartSummary, decorations, etaText, polylineAt, progressFromTrack } from "../../web/static/logic.js";
 
 const MENU = [
   { id: "r1-m1", name: "紅燒牛肉麵", price: 180 },
@@ -162,18 +122,29 @@ test("cartLines 依菜單順序列出數量大於 0 的品項", () => {
 
 // --- 追蹤進度 --------------------------------------------------------------
 
-test("trackingProgress 依行程分成四段", () => {
-  const s = { arrive_restaurant_s: 100, pickup_s: 300, deliver_s: 700 };
-  assert.deepEqual(trackingProgress(s, 0), { step: 0, frac: 0 });
-  assert.deepEqual(trackingProgress(s, 50), { step: 0, frac: 0.5 });
-  assert.deepEqual(trackingProgress(s, 200), { step: 1, frac: 0.5 });
-  assert.deepEqual(trackingProgress(s, 500), { step: 2, frac: 0.5 });
-  assert.deepEqual(trackingProgress(s, 700), { step: 3, frac: 1 });
+test("progressFromTrack 依伺服器回傳的階段計算進度", () => {
+  const sched = { arrive_restaurant_s: 100, pickup_s: 300, deliver_s: 700 };
+  assert.deepEqual(progressFromTrack("to_restaurant", 50, 650, sched), { step: 0, frac: 0.5 });
+  assert.deepEqual(progressFromTrack("to_restaurant", 400, 650, sched), { step: 0, frac: 0.95 });
+  assert.deepEqual(progressFromTrack("waiting", 200, 500, sched), { step: 1, frac: 0.5 });
+  assert.deepEqual(progressFromTrack("to_customer", 500, 200, sched), { step: 2, frac: 0.5 });
+  assert.deepEqual(progressFromTrack("delivered", 700, 0, sched), { step: 3, frac: 1 });
 });
 
-test("trackingProgress 外送員已在店家、不需等待時直接進入外送中", () => {
-  const s = { arrive_restaurant_s: 0, pickup_s: 0, deliver_s: 60 };
-  assert.deepEqual(trackingProgress(s, 0), { step: 2, frac: 0 });
+test("progressFromTrack 不需等待備餐時，等待段直接視為完成", () => {
+  const sched = { arrive_restaurant_s: 300, pickup_s: 300, deliver_s: 700 };
+  assert.deepEqual(progressFromTrack("waiting", 300, 400, sched), { step: 1, frac: 1 });
+});
+
+test("polylineAt 依路徑長度內插位置", () => {
+  const pts = [[0, 0], [1, 0], [1, 1]];
+  assert.deepEqual(polylineAt(pts, 0), [0, 0]);
+  assert.deepEqual(polylineAt(pts, 0.25), [0.5, 0]);
+  assert.deepEqual(polylineAt(pts, 0.75), [1, 0.5]);
+  assert.deepEqual(polylineAt(pts, 1), [1, 1]);
+  assert.deepEqual(polylineAt(pts, 2), [1, 1]);
+  assert.deepEqual(polylineAt([[3, 4]], 0.5), [3, 4]);
+  assert.deepEqual(polylineAt([[2, 2], [2, 2]], 0.5), [2, 2]);
 });
 
 test("etaText 顯示剩餘時間", () => {

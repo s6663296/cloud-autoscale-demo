@@ -1,10 +1,10 @@
-"""壓力測試執行：開放式負載、每秒回報 web、probe 容量量測（README 第 7 節）。"""
+"""壓力測試執行：模擬顧客（下單後追蹤到送達）、每秒回報 web、probe 容量量測（README 第 7 節）。"""
 
 import asyncio
 import random
 import time
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 import httpx
 
@@ -16,29 +16,41 @@ MAX_INFLIGHT = 2000
 REQUEST_TIMEOUT_S = 15.0
 TIMEOUT_LATENCY_MS = 15000
 REPORT_TIMEOUT_S = 3.0
+TRACK_INTERVAL_S = 2.0
+MAX_TRACK_FAILURES = 5  # 連續失敗這麼多次就放棄追蹤，像真實顧客關掉 App
 
 
-async def send_order(client: httpx.AsyncClient, url: str, body: dict, timeout_s: float = REQUEST_TIMEOUT_S):
-    """回傳 (outcome, latency_ms, instance_id)，分類方式與手機端一致。"""
+@dataclass
+class Result:
+    outcome: str
+    latency_ms: float
+    instance_id: str | None = None
+    data: Any = None
+
+
+async def send_request(
+    client: httpx.AsyncClient, url: str, path: str, body: dict, timeout_s: float = REQUEST_TIMEOUT_S
+) -> Result:
+    """送出一個請求並依 README 分類，方式與手機端一致。"""
     start = time.perf_counter()
     try:
-        res = await asyncio.wait_for(client.post(f"{url}/api/orders", json=body), timeout_s)
+        res = await asyncio.wait_for(client.post(f"{url}{path}", json=body), timeout_s)
     except (asyncio.TimeoutError, httpx.TimeoutException):
-        return "timeout", TIMEOUT_LATENCY_MS, None
+        return Result("timeout", TIMEOUT_LATENCY_MS)
     except httpx.HTTPError:
-        return "error", (time.perf_counter() - start) * 1000, None
+        return Result("error", (time.perf_counter() - start) * 1000)
     latency = (time.perf_counter() - start) * 1000
     if res.status_code == 200:
         try:
-            instance_id = res.json().get("instance_id")
+            data = res.json()
         except ValueError:
-            instance_id = None
-        return "ok", latency, instance_id
-    return ("busy" if res.status_code == 429 else "error"), latency, None
+            return Result("error", latency)
+        return Result("ok", latency, data.get("instance_id"), data)
+    return Result("busy" if res.status_code == 429 else "error", latency)
 
 
 class Session:
-    """管理各目標的連線、進行中請求、每秒彙總與回報。"""
+    """管理各目標的連線、進行中請求、模擬顧客、每秒彙總與回報。"""
 
     def __init__(
         self,
@@ -49,9 +61,10 @@ class Session:
         out: Callable[[str], None],
         max_inflight: int = MAX_INFLIGHT,
         timeout_s: float = REQUEST_TIMEOUT_S,
+        track_interval_s: float = TRACK_INTERVAL_S,
         target_transport: httpx.AsyncBaseTransport | None = None,
         web_transport: httpx.AsyncBaseTransport | None = None,
-        on_complete: Callable[[str, object, str], None] | None = None,
+        on_complete: Callable[[str, str], None] | None = None,
     ):
         self.targets = {name: url.rstrip("/") for name, url in targets.items()}
         self.web_url = web_url.rstrip("/")
@@ -59,13 +72,16 @@ class Session:
         self.out = out
         self.max_inflight = max_inflight
         self.timeout_s = timeout_s
+        self.track_interval_s = track_interval_s
         self.on_complete = on_complete
         self.rate_fn: Callable[[float], float] = lambda elapsed: 0.0
         self.agg = Aggregator(list(self.targets))
         self.inflight = dict.fromkeys(self.targets, 0)
+        self.delivering = dict.fromkeys(self.targets, 0)
+        self.abandoned = dict.fromkeys(self.targets, 0)
         self.totals = {name: Window() for name in self.targets}
         self.rng = random.Random()
-        self._tasks: set[asyncio.Task] = set()
+        self._customers: set[asyncio.Task] = set()
         self._reports: set[asyncio.Task] = set()
         self._transports = (target_transport, web_transport)
 
@@ -84,35 +100,64 @@ class Session:
 
     async def __aexit__(self, *exc) -> None:
         self._reporter.cancel()
-        for task in list(self._tasks):
+        for task in list(self._customers):
             task.cancel()
-        await asyncio.gather(self._reporter, *self._tasks, return_exceptions=True)
+        await asyncio.gather(self._reporter, *self._customers, return_exceptions=True)
         self._flush()  # 最後一筆回報
         await asyncio.gather(*self._reports, return_exceptions=True)
         for client in (*self.clients.values(), self.web):
             await client.aclose()
 
-    # --- 發送 ---------------------------------------------------------------
+    # --- 模擬顧客 -----------------------------------------------------------
 
-    def fire(self, body: dict, tag: object = None) -> None:
+    def new_customer(self, body: dict) -> None:
+        """一位新顧客：同時向每個目標下單，並各自追蹤到送達。"""
         for name in self.targets:
-            if self.inflight[name] >= self.max_inflight:
-                self.agg.dropped(name)
-                continue
-            self.agg.sent(name)
-            self.inflight[name] += 1
-            task = asyncio.create_task(self._send(name, body, tag))
-            self._tasks.add(task)
-            task.add_done_callback(self._tasks.discard)
+            task = asyncio.create_task(self._customer(name, body))
+            self._customers.add(task)
+            task.add_done_callback(self._customers.discard)
 
-    async def _send(self, name: str, body: dict, tag: object) -> None:
+    async def _customer(self, name: str, body: dict) -> None:
+        order = await self._request(name, "/api/orders", body, is_order=True)
+        if order is None or order.outcome != "ok" or "tracking" not in (order.data or {}):
+            return
+        tracking = order.data["tracking"]
+        failures = 0
+        self.delivering[name] += 1
         try:
-            outcome, latency, instance_id = await send_order(self.clients[name], self.targets[name], body, self.timeout_s)
+            while not self.stop.is_set():
+                await self.sleep(self.track_interval_s)
+                if self.stop.is_set():
+                    return
+                res = await self._request(name, "/api/track", {"order_id": body["order_id"], "tracking": tracking})
+                if res is not None and res.outcome == "ok":
+                    failures = 0
+                    tracking = res.data.get("tracking", tracking)
+                    if res.data.get("phase") == "delivered":
+                        return
+                    continue
+                failures += 1
+                if failures >= MAX_TRACK_FAILURES:
+                    self.abandoned[name] += 1
+                    return
+        finally:
+            self.delivering[name] -= 1
+
+    async def _request(self, name: str, path: str, body: dict, is_order: bool = False) -> Result | None:
+        """送出一個請求並計入統計；超過進行中上限時記為丟棄並回傳 None。"""
+        if self.inflight[name] >= self.max_inflight:
+            self.agg.dropped(name)
+            return None
+        self.agg.sent(name, order=is_order)
+        self.inflight[name] += 1
+        try:
+            res = await send_request(self.clients[name], self.targets[name], path, body, self.timeout_s)
         finally:
             self.inflight[name] -= 1
-        self.agg.completed(name, outcome, latency, instance_id)
+        self.agg.completed(name, res.outcome, res.latency_ms, res.instance_id)
         if self.on_complete:
-            self.on_complete(name, tag, outcome)
+            self.on_complete(name, res.outcome)
+        return res
 
     async def sleep(self, seconds: float) -> None:
         """可被 stop 中斷的 sleep。"""
@@ -122,8 +167,8 @@ class Session:
             pass
 
     async def drain(self) -> None:
-        """等待進行中的請求完成（最多 timeout_s），stop 時立即返回。"""
-        while self._tasks and not self.stop.is_set():
+        """等待所有顧客的配送結束（送達或放棄），stop 時立即返回。"""
+        while self._customers and not self.stop.is_set():
             await self.sleep(0.1)
 
     # --- 回報 ---------------------------------------------------------------
@@ -141,10 +186,11 @@ class Session:
         for name, w in windows.items():
             total = self.totals[name]
             total.sent += w.sent
+            total.orders += w.orders
             total.dropped += w.dropped
             for outcome, n in w.counts.items():
                 total.counts[outcome] += n
-        self.out(summary_line(elapsed, self.rate_fn(elapsed), windows, self.inflight))
+        self.out(summary_line(elapsed, self.rate_fn(elapsed), windows, self.inflight, self.delivering))
         task = asyncio.ensure_future(self._post(report_payload(windows, self.rng)))
         self._reports.add(task)
         task.add_done_callback(self._reports.discard)
@@ -158,8 +204,8 @@ class Session:
 
     def total_lines(self) -> list[str]:
         return [
-            f"{name} 共送出 {w.sent} 成功 {w.counts['ok']} 逾時 {w.counts['timeout']} "
-            f"忙碌 {w.counts['busy']} 錯誤 {w.counts['error']} 丟棄 {w.dropped}"
+            f"{name} 共下單 {w.orders} 請求 {w.sent} 成功 {w.counts['ok']} 逾時 {w.counts['timeout']} "
+            f"忙碌 {w.counts['busy']} 錯誤 {w.counts['error']} 丟棄 {w.dropped} 放棄追蹤 {self.abandoned[name]}"
             for name, w in self.totals.items()
         ]
 
@@ -176,19 +222,20 @@ async def run_load(
     out: Callable[[str], None] = print,
     max_inflight: int = MAX_INFLIGHT,
     timeout_s: float = REQUEST_TIMEOUT_S,
+    track_interval_s: float = TRACK_INTERVAL_S,
     target_transport: httpx.AsyncBaseTransport | None = None,
     web_transport: httpx.AsyncBaseTransport | None = None,
 ) -> None:
-    """兩個目標以相同速率、相同訂單內容同時施壓。"""
+    """新顧客依到達速率出現，兩個目標相同速率、相同訂單內容；每位顧客追蹤到送達。"""
     session = Session(
         targets, web_url, stop=stop, out=out, max_inflight=max_inflight, timeout_s=timeout_s,
-        target_transport=target_transport, web_transport=web_transport,
+        track_interval_s=track_interval_s, target_transport=target_transport, web_transport=web_transport,
     )
     async with session as s:
         s.rate_fn = lambda elapsed: rate_at(elapsed, rate, ramp) if elapsed < duration else 0.0
-        await run_schedule(rate, ramp, duration, lambda: s.fire(orders.next()), s.loop.time, s.sleep, s.stop)
+        await run_schedule(rate, ramp, duration, lambda: s.new_customer(orders.next()), s.loop.time, s.sleep, s.stop)
         if not stop.is_set():
-            out("排程結束，等待進行中的請求完成…")
+            out("排程結束，不再產生新顧客，等待進行中的配送完成…")
             await s.drain()
     for line in s.total_lines():
         out(line)
@@ -197,18 +244,12 @@ async def run_load(
 @dataclass
 class Stage:
     rate: int
-    sent: int = 0
-    done: int = 0
+    completed: int = 0
     failed: int = 0
-    finished_sending: bool = False
-
-    @property
-    def complete(self) -> bool:
-        return self.finished_sending and self.done >= self.sent
 
     @property
     def failure_rate(self) -> float:
-        return self.failed / self.sent if self.sent else 0.0
+        return self.failed / self.completed if self.completed else 0.0
 
 
 async def run_probe(
@@ -222,64 +263,45 @@ async def run_probe(
     orders: OrderFactory,
     stop: asyncio.Event,
     out: Callable[[str], None] = print,
+    track_interval_s: float = TRACK_INTERVAL_S,
     target_transport: httpx.AsyncBaseTransport | None = None,
     web_transport: httpx.AsyncBaseTransport | None = None,
 ) -> int | None:
-    """從 1 rps 起每 step_s 秒加 1 rps；某階段送出的請求失敗率超過 threshold 即停止。
+    """從 1 rps 起每 step_s 秒加 1 位新顧客/秒（含後續追蹤）。
 
-    回傳前一階段的速率作為容量 C；被中斷時回傳 None。
+    某階段期間完成的請求（下單與追蹤）失敗率超過 threshold 即停止，回傳前一階段的速率作為容量 C；
+    被中斷時回傳 None。
     """
-    stages: dict[int, Stage] = {}
-    reported: set[int] = set()
+    current: list[Stage] = []
 
-    def on_complete(target, tag, outcome):
-        stage = stages[tag]
-        stage.done += 1
+    def on_complete(target, outcome):
+        stage = current[-1]
+        stage.completed += 1
         if outcome != "ok":
             stage.failed += 1
-
-    def evaluate() -> int | None:
-        """依序檢查已完成的階段，回傳第一個失敗的階段速率。"""
-        for rate in sorted(stages):
-            stage = stages[rate]
-            if not stage.complete:
-                return None
-            if rate not in reported:
-                reported.add(rate)
-                out(f"階段 {rate:3d} rps：送出 {stage.sent} 失敗 {stage.failed}（{stage.failure_rate:.1%}）")
-            if stage.failure_rate > threshold:
-                return rate
-        return None
 
     # probe 只輸出階段結果；每秒的明細不印，但回報失敗的警告照常顯示
     session = Session(
         {name: url}, web_url, stop=stop, out=lambda line: out(line) if line.startswith("警告") else None,
-        target_transport=target_transport, web_transport=web_transport, on_complete=on_complete,
+        track_interval_s=track_interval_s, target_transport=target_transport, web_transport=web_transport,
+        on_complete=on_complete,
     )
     capacity = None
     async with session as s:
         for rate in range(1, max_rate + 1):
-            stage = stages[rate] = Stage(rate)
+            stage = Stage(rate)
+            current.append(stage)
             s.rate_fn = lambda elapsed, r=rate: r
-
-            def fire(stage=stage):
-                stage.sent += 1
-                s.fire(orders.next(), tag=stage.rate)
-
             out(f"開始 {rate} rps（{step_s:g} 秒）")
-            await run_schedule(rate, 0, step_s, fire, s.loop.time, s.sleep, s.stop)
-            stage.finished_sending = True
-            failed = evaluate()
-            if failed is not None:
-                capacity = failed - 1
-                break
+            await run_schedule(rate, 0, step_s, lambda: s.new_customer(orders.next()), s.loop.time, s.sleep, s.stop)
             if stop.is_set():
                 break
+            out(f"階段 {rate:3d} rps：完成 {stage.completed} 失敗 {stage.failed}（{stage.failure_rate:.1%}）")
+            if stage.failure_rate > threshold:
+                capacity = rate - 1
+                break
         else:
-            while not stop.is_set() and not all(st.complete for st in stages.values()):
-                await s.sleep(0.2)
-            failed = evaluate()
-            capacity = max_rate if failed is None else failed - 1
+            capacity = max_rate
 
     if capacity is None:
         out("probe 已中斷，未得到容量")

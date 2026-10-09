@@ -80,9 +80,11 @@ def test_config_from_env(monkeypatch):
     monkeypatch.setattr(config, "FIXED_URL", "https://fixed.example")
     monkeypatch.setattr(config, "AUTO_URL", "https://auto.example")
     monkeypatch.setattr(config, "TIMEOUT_MS", 50)
+    monkeypatch.setattr(config, "TRACK_INTERVAL_MS", 1500)
     with TestClient(create_app()) as c:
         assert c.get("/api/config").json() == {
             "fixed_url": "https://fixed.example", "auto_url": "https://auto.example", "timeout_ms": 50,
+            "track_interval_ms": 1500,
         }
 
 

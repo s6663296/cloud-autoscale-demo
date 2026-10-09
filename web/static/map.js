@@ -1,7 +1,7 @@
-// 外送地圖：以 SVG 畫成 Google 地圖風格，依 schedule 播放外送員動畫。
-// 每個追蹤區塊各有一個 CityMapView，動畫時鐘從該版本的結果到達時開始，彼此獨立。
+// 外送地圖：以 SVG 畫成 Google 地圖風格。
+// 外送員位置由後端的追蹤回應決定，前端只在兩次回應之間沿 trail 平滑移動。
 
-import { decorations, fitView, riderPosition, roadPaths, simSeconds } from "./logic.js";
+import { decorations, fitView, polylineAt, roadPaths } from "./logic.js";
 
 const NS = "http://www.w3.org/2000/svg";
 const ASPECT = 4 / 3;
@@ -19,12 +19,13 @@ function el(name, attrs = {}, parent = null) {
 const nonScaling = { "vector-effect": "non-scaling-stroke" };
 
 export class CityMapView {
-  constructor(svg, map, { onFrame } = {}) {
+  constructor(svg, map) {
     this.svg = svg;
     this.map = map;
-    this.onFrame = onFrame;
     this.frame = 0;
     this.result = null;
+    this.track = null;
+    this.riderPos = null;
     this.restaurant = null;
     this.glyph = "🏪";
     this.mode = "idle";
@@ -67,11 +68,26 @@ export class CityMapView {
   showResult(result) {
     this.stop();
     this.result = result;
+    this.track = null;
     this.mode = "result";
     const { to_restaurant: toR, to_customer: toC } = result.route;
+    this.riderPos = toR[0];
     this.setView([...toR, ...toC], 12);
-    this.started = performance.now();
-    this.animate();
+  }
+
+  /** 套用一次追蹤回應：更新路線，並在 durationMs 內沿 trail 移動外送員。 */
+  applyTrack(track, durationMs) {
+    this.stop();
+    this.track = track;
+    this.draw();
+    const trail = track.trail;
+    const started = performance.now();
+    const step = () => {
+      const frac = Math.min(1, (performance.now() - started) / durationMs);
+      this.moveRider(polylineAt(trail, frac));
+      if (frac < 1) this.frame = requestAnimationFrame(step);
+    };
+    step();
   }
 
   stop() {
@@ -106,8 +122,9 @@ export class CityMapView {
     this.overlay.replaceChildren();
     if (this.result) {
       const line = (nodes) => nodes.map(([x, y], i) => `${i ? "L" : "M"}${x} ${y}`).join("");
-      el("path", { d: line(this.result.route.to_restaurant), class: "route-to-restaurant", ...nonScaling }, this.overlay);
-      el("path", { d: line(this.result.route.to_customer), class: "route-to-customer", ...nonScaling }, this.overlay);
+      const { current, upcoming } = this.routes();
+      if (upcoming) el("path", { d: line(upcoming), class: "route-upcoming", ...nonScaling }, this.overlay);
+      if (current && current.length > 1) el("path", { d: line(current), class: "route-current", ...nonScaling }, this.overlay);
       const [cx, cy] = this.result.customer_node;
       this.customerPin(cx, cy, k);
     }
@@ -120,7 +137,25 @@ export class CityMapView {
       el("circle", { r: 14, class: "rider-bg" }, this.rider);
       const t = el("text", { "text-anchor": "middle", "dominant-baseline": "central", "font-size": 16, y: 1 }, this.rider);
       t.textContent = "🛵";
+      this.moveRider(this.riderPos);
     }
+  }
+
+  /** 目前這段要走的路線（實線）與之後的路線（虛線）。 */
+  routes() {
+    const planned = this.result.route;
+    if (!this.track) return { current: planned.to_restaurant, upcoming: planned.to_customer };
+    switch (this.track.phase) {
+      case "to_restaurant": return { current: this.track.route, upcoming: planned.to_customer };
+      case "waiting": return { current: null, upcoming: planned.to_customer };
+      case "to_customer": return { current: this.track.route, upcoming: null };
+      default: return { current: null, upcoming: null };
+    }
+  }
+
+  moveRider(pos) {
+    this.riderPos = pos;
+    if (this.rider && pos) this.rider.setAttribute("transform", `translate(${pos[0]} ${pos[1]}) scale(${this.px()})`);
   }
 
   drawLabels(k) {
@@ -158,16 +193,5 @@ export class CityMapView {
     el("path", { d: PIN_PATH, class: "pin-customer" }, g);
     el("circle", { cy: -28, r: 4, fill: "#fff" }, g);
     el("path", { d: "M-7 -16A7 7 0 0 1 7 -16Z", fill: "#fff" }, g);
-  }
-
-  // --- 動畫 ---------------------------------------------------------------
-
-  animate() {
-    const { schedule, route } = this.result;
-    const t = simSeconds(performance.now() - this.started, schedule.deliver_s);
-    const pos = riderPosition(route, schedule, t);
-    this.rider.setAttribute("transform", `translate(${pos.x} ${pos.y}) scale(${this.px()})`);
-    this.onFrame?.(t, pos);
-    if (pos.phase !== "delivered") this.frame = requestAnimationFrame(() => this.animate());
   }
 }

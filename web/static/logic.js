@@ -2,7 +2,6 @@
 
 export const TARGETS = ["fixed", "auto"];
 export const TIMEOUT_LATENCY_MS = 15000;
-export const PLAYBACK_MS = 30000;
 
 const round1 = (n) => Math.round(n * 10) / 10;
 
@@ -52,41 +51,23 @@ export function reportBody(orderId, results) {
 
 // --- 外送員動畫 ------------------------------------------------------------
 
-export function simSeconds(elapsedMs, deliverS, playMs = PLAYBACK_MS) {
-  return Math.min(elapsedMs / playMs, 1) * deliverS;
-}
-
-function along(nodes, frac) {
-  if (nodes.length === 1) return nodes[0];
-  const pos = Math.max(0, Math.min(1, frac)) * (nodes.length - 1);
-  const i = Math.min(Math.floor(pos), nodes.length - 2);
-  const t = pos - i;
-  const [ax, ay] = nodes[i];
-  const [bx, by] = nodes[i + 1];
-  return [ax + (bx - ax) * t, ay + (by - ay) * t];
-}
-
-/** 外送員在模擬第 t 秒的位置；路線上以等速前進。 */
-export function riderPosition(route, schedule, t) {
-  const { arrive_restaurant_s: arrive, pickup_s: pickup, deliver_s: deliver } = schedule;
-  const toR = route.to_restaurant;
-  const toC = route.to_customer;
-  let point;
-  let phase;
-  if (t >= deliver) {
-    point = toC[toC.length - 1];
-    phase = "delivered";
-  } else if (t < arrive) {
-    point = along(toR, t / arrive);
-    phase = "to_restaurant";
-  } else if (t < pickup) {
-    point = toR[toR.length - 1];
-    phase = "waiting";
-  } else {
-    point = along(toC, (t - pickup) / (deliver - pickup));
-    phase = "to_customer";
+/** 依路徑長度取得比例 frac（0–1）處的位置，用於在兩次追蹤回應之間平滑移動。 */
+export function polylineAt(points, frac) {
+  if (points.length === 1) return points[0];
+  const lengths = points.slice(1).map((p, i) => Math.hypot(p[0] - points[i][0], p[1] - points[i][1]));
+  const total = lengths.reduce((a, b) => a + b, 0);
+  if (total === 0 || frac <= 0) return points[0];
+  let remaining = Math.min(frac, 1) * total;
+  for (let i = 0; i < lengths.length; i++) {
+    if (remaining <= lengths[i] || i === lengths.length - 1) {
+      const t = lengths[i] === 0 ? 0 : Math.min(1, remaining / lengths[i]);
+      const [ax, ay] = points[i];
+      const [bx, by] = points[i + 1];
+      return [ax + (bx - ax) * t, ay + (by - ay) * t];
+    }
+    remaining -= lengths[i];
   }
-  return { x: point[0], y: point[1], phase };
+  return points[points.length - 1];
 }
 
 // --- 地圖 ------------------------------------------------------------------
@@ -186,14 +167,20 @@ export function cartSummary(menu, qty) {
 
 // --- 追蹤進度 --------------------------------------------------------------
 
-/** 四段進度：0 前往店家、1 備餐中、2 外送中、3 已送達；frac 為目前這段的完成比例。 */
-export function trackingProgress(schedule, t) {
-  const { arrive_restaurant_s: arrive, pickup_s: pickup, deliver_s: deliver } = schedule;
-  const ratio = (a, b) => (b > a ? Math.min(1, Math.max(0, (t - a) / (b - a))) : 1);
-  if (t >= deliver) return { step: 3, frac: 1 };
-  if (t < arrive) return { step: 0, frac: ratio(0, arrive) };
-  if (t < pickup) return { step: 1, frac: ratio(arrive, pickup) };
-  return { step: 2, frac: ratio(pickup, deliver) };
+/**
+ * 依追蹤回應計算四段進度：0 前往店家、1 備餐中、2 外送中、3 已送達；frac 為目前這段的完成比例。
+ * 階段以伺服器為準；段內比例參考派單時的行程估算（改道後可能與原估算不同，故前往店家最多顯示 95%）。
+ */
+export function progressFromTrack(phase, simS, etaS, schedule) {
+  const clamp = (v, hi = 1) => Math.min(hi, Math.max(0, v));
+  const { arrive_restaurant_s: arrive, pickup_s: pickup } = schedule;
+  if (phase === "delivered") return { step: 3, frac: 1 };
+  if (phase === "to_customer") {
+    const done = simS - pickup;
+    return { step: 2, frac: done + etaS > 0 ? clamp(done / (done + etaS)) : 0 };
+  }
+  if (phase === "waiting") return { step: 1, frac: pickup > arrive ? clamp((simS - arrive) / (pickup - arrive)) : 1 };
+  return { step: 0, frac: arrive > 0 ? clamp(simS / arrive, 0.95) : 0 };
 }
 
 export function etaText(deliverS, t) {
