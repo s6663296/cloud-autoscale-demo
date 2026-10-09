@@ -29,7 +29,7 @@ DEFAULTS = {"local": (8, 20, 120), "cloud": (60, 60, 300)}
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="python -m loadtest", description="外送快閃壓力測試（不帶參數為互動模式）")
+    parser = argparse.ArgumentParser(prog="python -m loadtest", description="外送系統 壓力測試（不帶參數為互動模式）")
     sub = parser.add_subparsers(dest="command", required=True)
 
     run = sub.add_parser("run", help="以固定到達速率同時對兩個 dispatch 施壓")
@@ -108,7 +108,7 @@ def _number(ask, out, question: str, default: float, allow_zero: bool = False) -
 
 
 def _prompt(ask, out, load_saved, save, fetch_config) -> argparse.Namespace | None:
-    out("外送快閃 壓力測試")
+    out("外送系統 壓力測試")
     out("目標環境：")
     out(f"  1) 本機（run_local.bat 啟動的服務，web {LOCAL_WEB}）")
     out("  2) 雲端（Cloud Run）")
