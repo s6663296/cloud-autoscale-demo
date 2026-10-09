@@ -107,6 +107,33 @@ export function roadPaths(map) {
   return out;
 }
 
+/**
+ * 城市外圍的裝飾道路（向外延伸 margin 格），讓視野超出城市時仍看得到街道而不是空白。
+ * 只畫城市範圍外的部分，不會蓋掉城市內的封閉路段；主幹道沿原本的行列延伸出去。
+ */
+export function outskirtPaths(map, margin) {
+  const { size } = map;
+  const lo = -margin;
+  const hi = size - 1 + margin;
+  const rows = new Set(map.arterials.rows);
+  const cols = new Set(map.arterials.cols);
+  const out = { roads: "", arterials: "" };
+  for (let line = lo; line <= hi; line++) {
+    const inside = line >= 0 && line < size;
+    // 城市內的行列只補左右（上下）兩段外圍；城市外的行列整條畫
+    const spans = inside ? [[lo, 0], [size - 1, hi]] : [[lo, hi]];
+    for (const [a, b] of spans) {
+      const h = `M${a} ${line}H${b}`;
+      const v = `M${line} ${a}V${b}`;
+      if (inside && rows.has(line)) out.arterials += h;
+      else out.roads += h;
+      if (inside && cols.has(line)) out.arterials += v;
+      else out.roads += v;
+    }
+  }
+  return out;
+}
+
 /** 涵蓋所有點的正方形 viewBox [x, y, w, h]。 */
 export function fitView(points, size, { minSpan = 16, pad = 2 } = {}) {
   const xs = points.map((p) => p[0]);

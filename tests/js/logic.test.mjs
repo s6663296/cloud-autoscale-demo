@@ -169,7 +169,7 @@ test("decorations 對同一張地圖結果固定，且都在地圖範圍內", ()
   assert.notDeepEqual(decorations({ size: 30 }), a);
 });
 
-import { trackReportBody } from "../../web/static/logic.js";
+import { outskirtPaths, trackReportBody } from "../../web/static/logic.js";
 
 test("trackReportBody 逾時記為 10000 毫秒", () => {
   assert.deepEqual(trackReportBody("auto", { outcome: "ok", latencyMs: 17.6, instanceId: "00bf" }), {
@@ -178,4 +178,15 @@ test("trackReportBody 逾時記為 10000 毫秒", () => {
   assert.deepEqual(trackReportBody("fixed", { outcome: "timeout", latencyMs: 15003, instanceId: null }), {
     target: "fixed", outcome: "timeout", latency_ms: 10000, instance_id: null,
   });
+});
+
+test("outskirtPaths 只畫城市外圍，主幹道沿原行列延伸", () => {
+  const map = { size: 3, closed: [], arterials: { rows: [1], cols: [] } };
+  const paths = outskirtPaths(map, 1);
+  // 城市內第 1 列是主幹道：只延伸左右兩段外圍
+  assert.ok(paths.arterials.includes("M-1 1H0") && paths.arterials.includes("M2 1H3"));
+  // 城市外的列整條畫
+  assert.ok(paths.roads.includes("M-1 -1H3") && paths.roads.includes("M-1 3H3"));
+  // 不會畫穿過城市內部
+  assert.ok(!paths.roads.includes("M0 1H") && !paths.arterials.includes("M-1 1H3"));
 });

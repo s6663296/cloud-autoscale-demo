@@ -1,9 +1,10 @@
 // 外送地圖：以 SVG 畫成 Google 地圖風格。
 // 外送員位置由後端的追蹤回應決定，前端只在兩次回應之間沿 trail 平滑移動。
 
-import { decorations, fitView, polylineAt, roadPaths } from "./logic.js";
+import { decorations, fitView, outskirtPaths, polylineAt, roadPaths } from "./logic.js";
 
 const NS = "http://www.w3.org/2000/svg";
+const OUTSKIRTS = 40; // 城市外圍裝飾道路的寬度（格），需大於視野可能超出城市的範圍
 const ROW_NAMES = ["中正路", "民生路", "忠孝路", "仁愛路"];
 const COL_NAMES = ["中山路", "復興路", "光復路", "敦化路"];
 const PIN_PATH = "M0 0C-3 -7 -14 -12 -14 -24A14 14 0 1 1 14 -24C14 -12 3 -7 0 0Z";
@@ -32,19 +33,27 @@ export class CityMapView {
     const { size } = map;
     const deco = decorations(map);
     const paths = roadPaths(map);
+    const outskirts = outskirtPaths(map, OUTSKIRTS);
     const base = el("g", {}, svg);
-    el("rect", { x: -20, y: -20, width: size + 40, height: size + 40, fill: "var(--map-bg)" }, base);
+    el("rect", {
+      x: -OUTSKIRTS - 1, y: -OUTSKIRTS - 1, width: size + 2 * OUTSKIRTS + 2, height: size + 2 * OUTSKIRTS + 2,
+      fill: "var(--map-bg)",
+    }, base);
     // 小路在下、綠地與河流在中、主幹道在上：河上只有主幹道跨過，像橋一樣
-    el("path", { d: paths.roads, class: "road", ...nonScaling }, base);
+    el("path", { d: paths.roads + outskirts.roads, class: "road", ...nonScaling }, base);
     for (const p of deco.parks) {
       el("rect", { x: p.x + 0.1, y: p.y + 0.1, width: p.w - 0.2, height: p.h - 0.2, rx: 0.4, class: "park" }, base);
     }
+    // 河流兩端水平延伸到外圍邊緣
+    const river = deco.river;
+    const ends = [[-OUTSKIRTS, river[0][1]], ...river, [size - 1 + OUTSKIRTS, river[river.length - 1][1]]];
     el("path", {
-      d: deco.river.map(([x, y], i) => `${i ? "L" : "M"}${x} ${y}`).join(""),
+      d: ends.map(([x, y], i) => `${i ? "L" : "M"}${x} ${y}`).join(""),
       class: "water", "stroke-width": 2.2,
     }, base);
-    el("path", { d: paths.arterials, class: "arterial-edge", ...nonScaling }, base);
-    el("path", { d: paths.arterials, class: "arterial", ...nonScaling }, base);
+    const arterials = paths.arterials + outskirts.arterials;
+    el("path", { d: arterials, class: "arterial-edge", ...nonScaling }, base);
+    el("path", { d: arterials, class: "arterial", ...nonScaling }, base);
     this.labels = el("g", {}, svg);
     this.overlay = el("g", {}, svg);
     this.setView([[size / 2, size / 2]], size);
@@ -112,8 +121,9 @@ export class CityMapView {
     // 寬高比跟著 app.css 的 .map aspect-ratio（手機正方形、寬螢幕 4:3）
     const ratio = this.svg.clientWidth / this.svg.clientHeight;
     const w = h * (Number.isFinite(ratio) && ratio > 0 ? ratio : 1);
-    // 盡量不露出城市範圍外的空白
-    const clamp = (v, len) => (len >= this.map.size + 1 ? v : Math.min(Math.max(v, -0.5), this.map.size - 0.5 - len));
+    // 視野比城市小時不超出城市；比城市大時置中，超出的部分由外圍裝飾道路填滿
+    const size = this.map.size;
+    const clamp = (v, len) => (len >= size + 1 ? (size - 1) / 2 - len / 2 : Math.min(Math.max(v, -0.5), size - 0.5 - len));
     this.view = [clamp(x + span / 2 - w / 2, w), clamp(y - span * 0.15, h), w, h];
     this.svg.setAttribute("viewBox", this.view.join(" "));
     // 縮小時小路變細，避免擠成一片
