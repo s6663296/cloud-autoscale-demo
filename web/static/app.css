@@ -143,6 +143,10 @@ body[data-screen="tracking"] .screens { max-width: 1040px; }
   bottom: 0;
   z-index: 5;
   margin-top: auto;
+  /* 首頁、追蹤頁在寬螢幕會變寬；底部按鈕一律維持手機欄寬並置中，各頁同位置按鈕等寬 */
+  align-self: center;
+  width: 100%;
+  max-width: 480px;
   padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
   /* 不加底色，按鈕直接浮在內容上；留白處讓點擊穿透到下方內容 */
   pointer-events: none;
@@ -529,6 +533,9 @@ body:has(.screen:not([hidden]) > .bottom-bar:not([hidden])) .order-fab { bottom:
 
 @media (min-width: 768px) {
   .layout { padding: 0 16px; }
+  /* 寬螢幕首頁：店家改為多欄網格（768px 約 2 欄、1040px 3 欄） */
+  body[data-screen="home"] .screens { max-width: 1040px; }
+  .restaurant-list { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
   .dashboard {
     margin-top: 16px;
     border-bottom: none;
