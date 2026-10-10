@@ -24,10 +24,13 @@ LOADTEST_REPORT = {
     "targets": {
         "fixed": {
             "ok": 8, "timeout": 52, "busy": 0, "error": 0,
-            "latency_samples_ms": [10000, 9873],
+            "latency_sum_ms": 523500, "latency_count": 60,
             "instance_ids": ["00a1..."],
         },
-        "auto": {"ok": 60, "timeout": 0, "busy": 0, "error": 0, "latency_samples_ms": [388], "instance_ids": ["00bf...", "00c2..."]},
+        "auto": {
+            "ok": 60, "timeout": 0, "busy": 0, "error": 0, "latency_sum_ms": 23280, "latency_count": 60,
+            "instance_ids": ["00bf...", "00c2..."],
+        },
     }
 }
 
@@ -43,23 +46,29 @@ def client(app):
         yield c
 
 
+def _snapshot(app):
+    """卡片只計入已結束的秒，取下一秒的快照才看得到剛寫入的資料。"""
+    return app.state.metrics.snapshot(time.time() + 1)
+
+
 def test_order_report_accepts_readme_example(client, app):
     assert client.post("/api/reports/order", json=ORDER_REPORT).status_code == 200
-    snap = app.state.metrics.snapshot()
-    assert snap["students"] == {"orders": 1, "fixed_ok": 0, "auto_ok": 1}
+    snap = _snapshot(app)
     assert snap["targets"]["auto"]["instances"] == 1
+    assert snap["targets"]["fixed"]["avg_ms"] == 10000
+    assert snap["targets"]["auto"]["avg_ms"] == 412
 
 
 def test_loadtest_report_accepts_readme_example(client, app):
     assert client.post("/api/reports/loadtest", json=LOADTEST_REPORT).status_code == 200
-    snap = app.state.metrics.snapshot()
+    snap = _snapshot(app)
     assert snap["targets"]["fixed"]["failures"]["timeout"] == 52
     assert snap["targets"]["auto"]["instances"] == 2
-    assert snap["students"]["orders"] == 0
+    assert snap["targets"]["auto"]["avg_ms"] == 388
 
 
 def test_loadtest_report_with_single_target(client):
-    body = {"targets": {"auto": {"ok": 1, "latency_samples_ms": [5]}}}
+    body = {"targets": {"auto": {"ok": 1, "latency_sum_ms": 5, "latency_count": 1}}}
     assert client.post("/api/reports/loadtest", json=body).status_code == 200
 
 
@@ -70,6 +79,7 @@ def test_loadtest_report_with_single_target(client):
         ("/api/reports/order", {"order_id": "x", "results": [{"target": "auto", "outcome": "great", "latency_ms": 1}]}),
         ("/api/reports/loadtest", {"targets": {"other": {"ok": 1}}}),
         ("/api/reports/loadtest", {"targets": {"auto": {"ok": -1}}}),
+        ("/api/reports/loadtest", {"targets": {"auto": {"latency_count": -1}}}),
     ],
 )
 def test_reports_reject_malformed(client, path, body):
@@ -145,7 +155,7 @@ def test_stream_sends_snapshot_every_second(live_server):
         events = _read_events(res, 4)
     assert [e["event"] for _, e in events] == ["snapshot"] * 4
     nows = [json.loads(e["data"])["now"] for _, e in events]
-    assert set(json.loads(events[0][1]["data"])) == {"now", "targets", "students", "series"}
+    assert set(json.loads(events[0][1]["data"])) == {"now", "targets", "series"}
     # 第一筆為連線時立即送出，之後每秒一筆
     gaps = [b[0] - a[0] for a, b in zip(events[1:], events[2:])]
     assert all(0.7 < g < 1.3 for g in gaps), gaps
@@ -166,9 +176,9 @@ def test_stream_unsubscribes_on_disconnect(live_server):
 def test_track_report_accepts_readme_example(client, app):
     body = {"target": "auto", "outcome": "ok", "latency_ms": 18, "instance_id": "00bf4bf0..."}
     assert client.post("/api/reports/track", json=body).status_code == 200
-    snap = app.state.metrics.snapshot()
-    assert snap["targets"]["auto"]["instances"] == 1
-    assert snap["students"]["orders"] == 0
+    auto = _snapshot(app)["targets"]["auto"]
+    assert auto["instances"] == 1
+    assert auto["avg_ms"] == 18  # 追蹤也計入延遲
 
 
 def test_track_report_rejects_malformed(client):

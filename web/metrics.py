@@ -2,59 +2,47 @@
 
 以「目標 × 來源」為維度，用 600 格的環狀陣列保存每秒資料。
 資料一律以 web 收到的時間分格，不使用回報方的時間戳。
+
+所有指標都以整個流程計算：下單與追蹤（更新外送員位置）都算。
+平均回應時間收 ok 與 timeout（逾時以 10000 毫秒計）；busy 與 error 很快就回來，
+算進延遲會讓服務越爛、延遲看起來越好，改由成功率呈現。
 """
 
-import math
-import random
 import time
 from typing import Callable
 
 TARGETS = ("fixed", "auto")
 SOURCES = ("student", "loadtest")
 OUTCOMES = ("ok", "timeout", "busy", "error")
+LATENCY_OUTCOMES = ("ok", "timeout")
 
 HISTORY_S = 600
-WINDOW_S = 60
-INSTANCE_WINDOW_S = 10
-RATE_LOOKBACK_S = 10
+WINDOW_S = 10  # 卡片上所有指標共用的視窗，與趨勢圖每一點的長度相同
 SERIES_STEP_S = 10
-MAX_SAMPLES = 200
 TIMEOUT_LATENCY_MS = 10000
 
 
-def percentile(samples: list[float], p: float) -> float | None:
-    """最近排名法（nearest-rank）。"""
-    if not samples:
-        return None
-    ordered = sorted(samples)
-    k = max(1, math.ceil(p / 100 * len(ordered)))
-    return ordered[k - 1]
-
-
 class _Cell:
-    __slots__ = ("counts", "samples", "seen")
+    __slots__ = ("counts", "latency_sum_ms", "latency_count")
 
     def __init__(self):
         self.counts = dict.fromkeys(OUTCOMES, 0)
-        self.samples: list[float] = []
-        self.seen = 0
+        self.latency_sum_ms = 0.0
+        self.latency_count = 0
 
 
 class _Slot:
-    __slots__ = ("sec", "cells", "instances", "student_orders", "student_ok")
+    __slots__ = ("sec", "cells", "instances")
 
     def __init__(self, sec: int):
         self.sec = sec
         self.cells = {(t, s): _Cell() for t in TARGETS for s in SOURCES}
         self.instances: dict[str, set[str]] = {t: set() for t in TARGETS}
-        self.student_orders = 0
-        self.student_ok = dict.fromkeys(TARGETS, 0)  # 觀眾下單成功數（不含追蹤）
 
 
 class Metrics:
-    def __init__(self, clock: Callable[[], float] = time.time, rng: random.Random | None = None):
+    def __init__(self, clock: Callable[[], float] = time.time):
         self._clock = clock
-        self._rng = rng or random.Random()
         self._slots: list[_Slot | None] = [None] * HISTORY_S
         self._series_cache: dict[int, dict] = {}
 
@@ -63,33 +51,32 @@ class Metrics:
     def record_order(self, results: list[dict]) -> None:
         """觀眾訂單：一筆訂單在兩個目標的派單結果。"""
         slot = self._current_slot()
-        slot.student_orders += 1
         for r in results:
             self._record_student(slot, r)
-            if r["outcome"] == "ok":
-                slot.student_ok[r["target"]] += 1
 
     def record_track(self, result: dict) -> None:
-        """觀眾手機的單次追蹤結果：計入目標指標，不計入觀眾訂單數。"""
+        """觀眾手機的單次追蹤結果，與下單一樣計入所有指標。"""
         self._record_student(self._current_slot(), result)
 
-    def _record_student(self, slot: "_Slot", r: dict) -> None:
-        target, outcome = r["target"], r["outcome"]
-        cell = slot.cells[(target, "student")]
-        cell.counts[outcome] += 1
-        latency = TIMEOUT_LATENCY_MS if outcome == "timeout" else r["latency_ms"]
-        self._add_samples(cell, [latency])
+    @staticmethod
+    def _record_student(slot: "_Slot", r: dict) -> None:
+        cell = slot.cells[(r["target"], "student")]
+        cell.counts[r["outcome"]] += 1
+        if r["outcome"] in LATENCY_OUTCOMES:
+            cell.latency_sum_ms += TIMEOUT_LATENCY_MS if r["outcome"] == "timeout" else r["latency_ms"]
+            cell.latency_count += 1
         if r.get("instance_id"):
-            slot.instances[target].add(r["instance_id"])
+            slot.instances[r["target"]].add(r["instance_id"])
 
     def record_loadtest(self, targets: dict[str, dict]) -> None:
-        """壓力測試每秒彙總。"""
+        """壓力測試每秒彙總；延遲已由壓測端加總（只含 ok 與 timeout）。"""
         slot = self._current_slot()
         for target, data in targets.items():
             cell = slot.cells[(target, "loadtest")]
             for outcome in OUTCOMES:
                 cell.counts[outcome] += data.get(outcome, 0)
-            self._add_samples(cell, data.get("latency_samples_ms", []))
+            cell.latency_sum_ms += data.get("latency_sum_ms", 0.0)
+            cell.latency_count += data.get("latency_count", 0)
             slot.instances[target].update(data.get("instance_ids", []))
 
     def _current_slot(self) -> _Slot:
@@ -99,17 +86,6 @@ class Metrics:
         if slot is None or slot.sec != sec:
             slot = self._slots[i] = _Slot(sec)
         return slot
-
-    def _add_samples(self, cell: _Cell, samples: list[float]) -> None:
-        """蓄水池抽樣，每格最多保留 MAX_SAMPLES 筆。"""
-        for value in samples:
-            cell.seen += 1
-            if len(cell.samples) < MAX_SAMPLES:
-                cell.samples.append(value)
-            else:
-                j = self._rng.randrange(cell.seen)
-                if j < MAX_SAMPLES:
-                    cell.samples[j] = value
 
     # --- 讀取 ---------------------------------------------------------------
 
@@ -123,58 +99,41 @@ class Metrics:
         return found
 
     @staticmethod
-    def _collect(slots: list[_Slot], target: str) -> tuple[dict[str, int], list[float]]:
+    def _summary(slots: list[_Slot], target: str) -> dict:
+        """成功率與平均回應時間；卡片與趨勢圖共用同一套規則。"""
         counts = dict.fromkeys(OUTCOMES, 0)
-        samples: list[float] = []
+        latency_sum, latency_count = 0.0, 0
         for slot in slots:
             for source in SOURCES:
                 cell = slot.cells[(target, source)]
                 for outcome in OUTCOMES:
                     counts[outcome] += cell.counts[outcome]
-                samples.extend(cell.samples)
-        return counts, samples
-
-    def samples_in_window(self, target: str, now: float, seconds: int) -> list[float]:
-        now_sec = int(now)
-        return self._collect(self._slots_between(now_sec - seconds + 1, now_sec + 1), target)[1]
+                latency_sum += cell.latency_sum_ms
+                latency_count += cell.latency_count
+        completed = sum(counts.values())
+        return {
+            "completed": completed,
+            "success_rate": counts["ok"] / completed if completed else None,
+            "avg_ms": latency_sum / latency_count if latency_count else None,
+            "failures": {o: counts[o] for o in ("timeout", "busy", "error")},
+        }
 
     def snapshot(self, now: float | None = None) -> dict:
+        """卡片指標：最近 WINDOW_S 個已結束的秒。目前這一秒還在寫入，不採用。"""
         now_sec = int(self._clock() if now is None else now)
-        window = self._slots_between(now_sec - WINDOW_S + 1, now_sec + 1)
-        recent = self._slots_between(now_sec - INSTANCE_WINDOW_S + 1, now_sec + 1)
+        window = self._slots_between(now_sec - WINDOW_S, now_sec)
 
         targets = {}
         for target in TARGETS:
-            counts, samples = self._collect(window, target)
-            completed = sum(counts.values())
+            s = self._summary(window, target)
             targets[target] = {
-                "instances": len(set().union(*(s.instances[target] for s in recent))),
-                "rps": completed / WINDOW_S,
-                "success_rate": self._latest_success_rate(target, now_sec),
-                "p50_ms": percentile(samples, 50) if completed else None,
-                "p95_ms": percentile(samples, 95) if completed else None,
-                "failures": {o: counts[o] for o in ("timeout", "busy", "error")},
+                "instances": len(set().union(*(slot.instances[target] for slot in window))),
+                "rps": s["completed"] / WINDOW_S,
+                "success_rate": s["success_rate"],
+                "avg_ms": s["avg_ms"],
+                "failures": s["failures"],
             }
-
-        students = {
-            "orders": sum(s.student_orders for s in window),
-            "fixed_ok": sum(s.student_ok["fixed"] for s in window),
-            "auto_ok": sum(s.student_ok["auto"] for s in window),
-        }
-        return {"now": now_sec, "targets": targets, "students": students, "series": self._series(now_sec)}
-
-    def _latest_success_rate(self, target: str, now_sec: int) -> float | None:
-        """最近一個已結束、且有完成請求的那一秒的成功率。
-
-        用 60 秒視窗的話，服務掛掉後還會被前面成功的請求撐住好一陣子，看起來像沒事。
-        目前這一秒還在寫入，不採用；流量低時往回找最多 RATE_LOOKBACK_S 秒。
-        """
-        for sec in range(now_sec - 1, now_sec - 1 - RATE_LOOKBACK_S, -1):
-            counts, _ = self._collect(self._slots_between(sec, sec + 1), target)
-            completed = sum(counts.values())
-            if completed:
-                return counts["ok"] / completed
-        return None
+        return {"now": now_sec, "targets": targets, "series": self._series(now_sec)}
 
     def _series(self, now_sec: int) -> list[dict]:
         """已結束的區間不會再寫入（寫入一律落在目前時間），計算一次後快取。
@@ -198,10 +157,6 @@ class Metrics:
         slots = self._slots_between(start, start + SERIES_STEP_S)
         point = {"t": start}
         for target in TARGETS:
-            counts, samples = self._collect(slots, target)
-            completed = sum(counts.values())
-            point[target] = {
-                "success_rate": counts["ok"] / completed if completed else None,
-                "p95_ms": percentile(samples, 95) if completed else None,
-            }
+            s = self._summary(slots, target)
+            point[target] = {"success_rate": s["success_rate"], "avg_ms": s["avg_ms"]}
         return point

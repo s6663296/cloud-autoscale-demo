@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from typing import Callable
 
 from loadtest.orders import OrderFactory
-from loadtest.runner import MAX_INFLIGHT, run_load
+from loadtest.runner import LOCAL_MAX_CONNECTIONS, MAX_INFLIGHT, run_load
 from loadtest.stats import Window, merge_windows, summary_line, total_lines
 
 DEFAULT_PROCS = max(1, min(4, (os.cpu_count() or 2) // 2))
@@ -83,7 +83,7 @@ class Merger:
         ))
 
 
-def _child(idx: int, targets: dict, web_url: str, rate: float, ramp: float, duration: float,
+def _child(idx: int, procs: int, targets: dict, web_url: str, rate: float, ramp: float, duration: float,
            max_inflight: int, map_json: dict, track_interval_s: float, q) -> None:
     async def main():
         stop = asyncio.Event()
@@ -95,13 +95,14 @@ def _child(idx: int, targets: dict, web_url: str, rate: float, ramp: float, dura
             q.put(("window", tick, elapsed, rate_now, windows, inflight, delivering))
 
         with stop_on_signal(stop):
-            totals, abandoned = await run_load(
+            totals, abandoned, gave_up = await run_load(
                 targets, web_url, rate=rate, ramp=ramp, duration=duration,
                 orders=OrderFactory(map_json, random.Random()), stop=stop, track_interval_s=track_interval_s,
-                max_inflight=max_inflight, out=lambda line: q.put(("log", idx, line)),
+                max_inflight=max_inflight, max_connections=max(1, LOCAL_MAX_CONNECTIONS // procs),
+                out=lambda line: q.put(("log", idx, line)),
                 on_window=on_window, print_totals=False,
             )
-        q.put(("done", idx, totals, abandoned))
+        q.put(("done", idx, totals, abandoned, gave_up))
 
     try:
         asyncio.run(main())
@@ -117,7 +118,7 @@ def run_parallel(targets: dict[str, str], web_url: str, *, rate: float, ramp: fl
     children = [
         ctx.Process(
             target=_child, daemon=True,
-            args=(i, targets, web_url, rate / procs, ramp, duration, max(1, MAX_INFLIGHT // procs),
+            args=(i, procs, targets, web_url, rate / procs, ramp, duration, max(1, MAX_INFLIGHT // procs),
                   map_json, track_interval_s, q),
         )
         for i in range(procs)
@@ -141,6 +142,7 @@ def run_parallel(targets: dict[str, str], web_url: str, *, rate: float, ramp: fl
         merger = Merger(procs, out)
         totals: list[dict[str, Window]] = []
         abandoned: dict[str, int] = {}
+        gave_up: dict[str, int] = {}
         done = 0
         while done < procs:
             try:
@@ -162,8 +164,10 @@ def run_parallel(targets: dict[str, str], web_url: str, *, rate: float, ramp: fl
                 totals.append(msg[2])
                 for name, n in msg[3].items():
                     abandoned[name] = abandoned.get(name, 0) + n
+                for name, n in msg[4].items():
+                    gave_up[name] = gave_up.get(name, 0) + n
         merger.flush()
-        for line in total_lines(merge_windows(totals), abandoned):
+        for line in total_lines(merge_windows(totals), abandoned, gave_up):
             out(line)
         return 0 if done == procs else 1
     except KeyboardInterrupt:

@@ -185,6 +185,26 @@ export function formatMs(ms) {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
+/** 延遲：逾時一律記為 TIMEOUT_LATENCY_MS，全部逾時時代表至少等了這麼久，不是剛好這麼久。 */
+export function formatLatency(ms) {
+  if (ms !== null && ms !== undefined && ms >= TIMEOUT_LATENCY_MS) return `≥${TIMEOUT_LATENCY_MS / 1000} s`;
+  return formatMs(ms);
+}
+
+const FAILURE_NAMES = [["timeout", "逾時"], ["busy", "忙碌"], ["error", "錯誤"]];
+
+/** 失敗次數：只列出有發生的種類，例如「逾時 173 · 錯誤 2」；全部為 0 時顯示「無」。 */
+export function failureText(failures) {
+  const parts = FAILURE_NAMES.filter(([key]) => failures[key] > 0).map(([key, name]) => `${name} ${failures[key]}`);
+  return parts.length ? parts.join(" · ") : "無";
+}
+
+/** 卡片的平均回應時間文字與是否用小字：有請求卻沒有延遲（全是忙碌或錯誤）時明講，不要顯示成沒有資料。 */
+export function latencyText(t) {
+  if (t.avg_ms !== null && t.avg_ms !== undefined) return [formatLatency(t.avg_ms), false];
+  return t.rps > 0 ? ["全部失敗", true] : ["—", false];
+}
+
 // --- 購物車 ----------------------------------------------------------------
 
 export function cartLines(menu, qty) {
