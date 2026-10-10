@@ -9,7 +9,7 @@ import pytest
 
 from loadtest.orders import OrderFactory
 from loadtest.parallel import Merger
-from loadtest.runner import MAX_TRACK_FAILURES, run_load, run_probe, send_request
+from loadtest.runner import MAX_ORDER_ATTEMPTS, MAX_TRACK_FAILURES, run_load, run_probe, send_request
 from loadtest.schedule import rate_at, run_schedule, send_times
 from loadtest.stats import Aggregator, Window, merge_windows, report_payload
 from shared.citymap import build_city
@@ -97,7 +97,7 @@ def test_schedule_stops_when_stop_set():
 # --- 彙總 -------------------------------------------------------------------
 
 
-def test_aggregate_counts_and_samples_capped():
+def test_aggregate_counts_and_latency_sum():
     agg = Aggregator(["fixed", "auto"])
     for i in range(500):
         agg.sent("fixed")
@@ -108,31 +108,35 @@ def test_aggregate_counts_and_samples_capped():
     agg.completed("fixed", "error", 5, None)
     agg.dropped("auto")
     windows = agg.flush()
-    payload = report_payload(windows, random.Random(0))
+    payload = report_payload(windows)
     fixed = payload["targets"]["fixed"]
     assert (fixed["ok"], fixed["timeout"], fixed["busy"], fixed["error"]) == (500, 7, 1, 1)
-    assert len(fixed["latency_samples_ms"]) == 200
+    assert (fixed["latency_sum_ms"], fixed["latency_count"]) == (sum(range(500)) + 70000, 507)
     assert sorted(fixed["instance_ids"]) == ["inst-a", "inst-b"]
     assert payload["targets"]["auto"] == {
-        "ok": 0, "timeout": 0, "busy": 0, "error": 0, "latency_samples_ms": [], "instance_ids": [],
+        "ok": 0, "timeout": 0, "busy": 0, "error": 0, "latency_sum_ms": 0, "latency_count": 0, "instance_ids": [],
     }
     assert windows["fixed"].sent == 500 and windows["auto"].dropped == 1
     assert "dropped" not in json.dumps(payload)
 
 
-def test_aggregate_keeps_all_samples_under_cap():
+def test_latency_counts_ok_and_timeout_only():
+    """與 web 的平均回應時間同一個定義：下單與追蹤都算，busy、error 只計數，不計延遲。"""
     agg = Aggregator(["auto"])
-    for v in (5, 6, 7):
-        agg.completed("auto", "ok", v, None)
-    payload = report_payload(agg.flush(), random.Random(0))
-    assert sorted(payload["targets"]["auto"]["latency_samples_ms"]) == [5, 6, 7]
+    agg.completed("auto", "ok", 300, None)
+    agg.completed("auto", "timeout", 10000, None)
+    agg.completed("auto", "busy", 5, None)
+    agg.completed("auto", "error", 7, None)
+    w = agg.flush()["auto"]
+    assert (w.latency_sum_ms, w.latency_count, w.avg_ms) == (10300, 2, 5150)
+    assert Aggregator(["auto"]).flush()["auto"].avg_ms is None
 
 
 def test_flush_resets_window():
     agg = Aggregator(["auto"])
     agg.completed("auto", "ok", 5, None)
     agg.flush()
-    assert report_payload(agg.flush(), random.Random(0))["targets"]["auto"]["ok"] == 0
+    assert report_payload(agg.flush())["targets"]["auto"]["ok"] == 0
 
 
 # --- 訂單 -------------------------------------------------------------------
@@ -264,9 +268,11 @@ class Web:
 class FakeDispatch:
     """下單回傳初始 tracking；追蹤 track_steps 次後送達。"""
 
-    def __init__(self, track_steps=2, order_status=200, track_status=200, order_delay=0.0):
+    def __init__(self, track_steps=2, order_status=200, track_status=200, order_delay=0.0, order_failures=None):
         self.track_steps = track_steps
         self.order_status = order_status
+        self.order_failures = order_failures  # 每筆訂單在每個目標的前幾次下單回 order_status，之後成功
+        self.order_attempts = {}
         self.track_status = track_status
         self.order_delay = order_delay
         self.orders = 0
@@ -280,7 +286,10 @@ class FakeDispatch:
             self.orders += 1
             if self.order_delay:
                 await asyncio.sleep(self.order_delay)
-            if self.order_status != 200:
+            key = (request.url.host, body["order_id"])
+            self.order_attempts[key] = self.order_attempts.get(key, 0) + 1
+            failing = self.order_failures is None or self.order_attempts[key] <= self.order_failures
+            if self.order_status != 200 and failing:
                 return httpx.Response(self.order_status)
             return httpx.Response(200, json={"instance_id": "i-1", "tracking": {"step": 0}})
         key = (request.url.host, body["order_id"])
@@ -355,11 +364,25 @@ def test_abandons_after_consecutive_track_failures():
     assert any("放棄" in line for line in lines)
 
 
-def test_failed_order_is_not_tracked():
+def test_failed_order_retried_then_given_up():
+    """下單失敗的顧客像真人一樣再按幾次；一直失敗就放棄，不會開始追蹤。"""
     web, fake = Web(), FakeDispatch(order_status=429)
-    _run_load(web, fake, duration=0.5, rate=10)
+    lines = _run_load(web, fake, duration=0.5, rate=10)
+    customers = len(fake.order_attempts) // 2  # 兩個目標各一組
+    assert set(fake.order_attempts.values()) == {MAX_ORDER_ATTEMPTS}
     assert fake.tracks == 0
-    assert web.total("fixed", "busy") == fake.orders // 2
+    assert web.total("fixed", "busy") == customers * MAX_ORDER_ATTEMPTS
+    total = next(line for line in lines if line.startswith("fixed 共下單"))
+    assert _field(total, "放棄下單") == customers
+
+
+def test_order_retry_succeeds_and_tracks():
+    web, fake = Web(), FakeDispatch(order_status=503, order_failures=2, track_steps=1)
+    lines = _run_load(web, fake, duration=0.5, rate=10)
+    assert set(fake.order_attempts.values()) == {3}
+    assert fake.tracks == len(fake.order_attempts)  # 每位顧客在每個目標都追蹤到送達
+    total = next(line for line in lines if line.startswith("fixed 共下單"))
+    assert _field(total, "放棄下單") == 0
 
 
 def test_run_load_reports_every_second():
@@ -436,6 +459,16 @@ def test_httpcore_async_detection_is_cached():
     assert sys.modules.get("sniffio") is not None
 
 
+def test_local_targets_cap_connections():
+    """本機 uvicorn 在 Windows 上超過 512 個 socket 會崩潰，本機目標的連線數要壓在這以下；雲端不受限。"""
+    from loadtest.runner import LOCAL_MAX_CONNECTIONS, MAX_INFLIGHT, POOL_SHARDS, shard_connections
+
+    assert shard_connections("http://localhost:8001", MAX_INFLIGHT, LOCAL_MAX_CONNECTIONS) * POOL_SHARDS <= 256
+    assert shard_connections("https://fixed.run.app", MAX_INFLIGHT, LOCAL_MAX_CONNECTIONS) * POOL_SHARDS >= MAX_INFLIGHT
+    assert shard_connections("http://localhost:8001", MAX_INFLIGHT // 4, LOCAL_MAX_CONNECTIONS // 4) * POOL_SHARDS * 4 <= 256
+    assert shard_connections("http://localhost:8001", 1, 1) == 1
+
+
 def test_requests_rotate_across_pool_shards(monkeypatch):
     """每個目標拆成多個小連線池輪流使用，避免 httpcore 每次掃描整個大連線池。"""
     from loadtest import runner
@@ -466,7 +499,7 @@ def test_requests_rotate_across_pool_shards(monkeypatch):
 def _window(ok=0, timeout=0, latencies=(), ids=(), sent=None, orders=0, dropped=0):
     w = Window()
     w.counts["ok"], w.counts["timeout"] = ok, timeout
-    w.latencies = list(latencies)
+    w.latency_sum_ms, w.latency_count = float(sum(latencies)), len(latencies)
     w.instance_ids = set(ids)
     w.sent = ok + timeout if sent is None else sent
     w.orders, w.dropped = orders, dropped
@@ -481,14 +514,14 @@ def test_merge_windows_adds_counts_and_unions_instances():
     ])
     auto = merged["auto"]
     assert (auto.counts["ok"], auto.counts["timeout"], auto.sent, auto.orders, auto.dropped) == (3, 1, 4, 3, 1)
-    assert sorted(auto.latencies) == [10, 20, 30, 10000]
+    assert (auto.latency_sum_ms, auto.latency_count) == (10060, 4)
     assert auto.instance_ids == {"a", "b"}
     assert merged["fixed"].counts["ok"] == 1
 
 
 def test_window_survives_pickle():
     w = pickle.loads(pickle.dumps(_window(ok=1, latencies=[1.5], ids=["x"])))
-    assert (w.counts["ok"], w.latencies, w.instance_ids) == (1, [1.5], {"x"})
+    assert (w.counts["ok"], w.latency_sum_ms, w.latency_count, w.instance_ids) == (1, 1.5, 1, {"x"})
 
 
 def test_merger_prints_once_all_processes_report():

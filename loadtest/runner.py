@@ -2,7 +2,6 @@
 
 import asyncio
 import importlib.util
-import random
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -19,11 +18,26 @@ TIMEOUT_LATENCY_MS = 10000
 REPORT_TIMEOUT_S = 3.0
 TRACK_INTERVAL_S = 2.0
 MAX_TRACK_FAILURES = 5  # 連續失敗這麼多次就放棄追蹤，像真實顧客關掉 App
+# 下單失敗時像真實顧客一樣隔一下再按一次，最多試這麼多次。失敗的顧客若直接消失，
+# 撐不住的一方會因為沒有後續的位置更新而突然變輕、短暫恢復，接著又被新顧客壓垮，反覆波動
+MAX_ORDER_ATTEMPTS = 5
 # httpcore 每個請求都會掃描整個連線池（O(連線數)），連線多時把池子拆小、輪流使用
 POOL_SHARDS = 8
 # 雲端（HTTPS）改用 HTTP/2，所有請求共用少數幾條連線；HTTP/1.1 每個進行中請求各佔一條連線，
 # 上千條連線加上逾時後重連，會把家用路由器打掛。本機是 http://，httpx 照樣走 HTTP/1.1
 HTTP2 = importlib.util.find_spec("h2") is not None
+# 本機（http://）走 HTTP/1.1，每個進行中請求各佔一條連線。Windows 上 uvicorn 用 SelectorEventLoop，
+# select() 最多 512 個 socket，超過時事件迴圈直接崩潰：程序還在、埠還在監聽，但再也不接受連線。
+# 因此本機每個目標的連線數壓在這以下，多出的請求在壓測端排隊（計入延遲），如同 Cloud Run 前端的佇列。
+LOCAL_MAX_CONNECTIONS = 256
+
+
+def shard_connections(url: str, max_inflight: int, max_connections: int) -> int:
+    """每個連線池（shard）的連線上限；只有本機目標受 max_connections 限制。"""
+    n = -(-max_inflight // POOL_SHARDS)
+    if not url.startswith("https://"):
+        n = min(n, max_connections // POOL_SHARDS)
+    return max(1, n)
 
 
 _background: set[asyncio.Task] = set()  # 已逾時、仍在背景跑完的請求；保留參照避免被回收
@@ -86,8 +100,10 @@ class Session:
         stop: asyncio.Event,
         out: Callable[[str], None],
         max_inflight: int = MAX_INFLIGHT,
+        max_connections: int = LOCAL_MAX_CONNECTIONS,
         timeout_s: float = REQUEST_TIMEOUT_S,
         track_interval_s: float = TRACK_INTERVAL_S,
+        order_attempts: int = MAX_ORDER_ATTEMPTS,
         target_transport: httpx.AsyncBaseTransport | None = None,
         web_transport: httpx.AsyncBaseTransport | None = None,
         on_complete: Callable[[str, str], None] | None = None,
@@ -98,8 +114,10 @@ class Session:
         self.stop = stop
         self.out = out
         self.max_inflight = max_inflight
+        self.max_connections = max_connections
         self.timeout_s = timeout_s
         self.track_interval_s = track_interval_s
+        self.order_attempts = order_attempts
         self.on_complete = on_complete
         self.on_window = on_window  # 有設定時每秒統計交給它，不印 summary_line
         self.rate_fn: Callable[[float], float] = lambda elapsed: 0.0
@@ -107,22 +125,24 @@ class Session:
         self.inflight = dict.fromkeys(self.targets, 0)
         self.delivering = dict.fromkeys(self.targets, 0)
         self.abandoned = dict.fromkeys(self.targets, 0)
+        self.gave_up = dict.fromkeys(self.targets, 0)  # 下單一直失敗而放棄的顧客
         self.totals = {name: Window() for name in self.targets}
-        self.rng = random.Random()
         self._customers: set[asyncio.Task] = set()
         self._reports: set[asyncio.Task] = set()
         self._transports = (target_transport, web_transport)
 
     async def __aenter__(self) -> "Session":
         target_transport, web_transport = self._transports
-        per_shard = max(1, -(-self.max_inflight // POOL_SHARDS))
-        limits = httpx.Limits(max_connections=per_shard, max_keepalive_connections=per_shard)
+        def limits(url: str) -> httpx.Limits:
+            n = shard_connections(url, self.max_inflight, self.max_connections)
+            return httpx.Limits(max_connections=n, max_keepalive_connections=n)
+
         self.clients = {
             name: [
-                httpx.AsyncClient(limits=limits, timeout=self.timeout_s + 5, transport=target_transport, http2=HTTP2)
+                httpx.AsyncClient(limits=limits(url), timeout=self.timeout_s + 5, transport=target_transport, http2=HTTP2)
                 for _ in range(POOL_SHARDS)
             ]
-            for name in self.targets
+            for name, url in self.targets.items()
         }
         self._next_shard = 0
         self.web = httpx.AsyncClient(timeout=REPORT_TIMEOUT_S, transport=web_transport, http2=HTTP2)
@@ -151,8 +171,8 @@ class Session:
             task.add_done_callback(self._customers.discard)
 
     async def _customer(self, name: str, body: dict) -> None:
-        order = await self._request(name, "/api/orders", body, is_order=True)
-        if order is None or order.outcome != "ok" or "tracking" not in (order.data or {}):
+        order = await self._order(name, body)
+        if order is None or "tracking" not in (order.data or {}):
             return
         tracking = order.data["tracking"]
         failures = 0
@@ -175,6 +195,19 @@ class Session:
                     return
         finally:
             self.delivering[name] -= 1
+
+    async def _order(self, name: str, body: dict) -> Result | None:
+        """下單，失敗時隔 track_interval_s 再按一次，最多 order_attempts 次；全部失敗回傳 None。"""
+        for attempt in range(self.order_attempts):
+            if attempt:
+                await self.sleep(self.track_interval_s)
+                if self.stop.is_set():
+                    return None
+            res = await self._request(name, "/api/orders", body, is_order=True)
+            if res is not None and res.outcome == "ok":
+                return res
+        self.gave_up[name] += 1
+        return None
 
     async def _request(self, name: str, path: str, body: dict, is_order: bool = False) -> Result | None:
         """送出一個請求並計入統計；超過進行中上限時記為丟棄並回傳 None。"""
@@ -229,7 +262,7 @@ class Session:
             self.on_window(elapsed, self.rate_fn(elapsed), windows, dict(self.inflight), dict(self.delivering))
         else:
             self.out(summary_line(elapsed, self.rate_fn(elapsed), windows, self.inflight, self.delivering))
-        task = asyncio.ensure_future(self._post(report_payload(windows, self.rng)))
+        task = asyncio.ensure_future(self._post(report_payload(windows)))
         self._reports.add(task)
         task.add_done_callback(self._reports.discard)
 
@@ -241,7 +274,7 @@ class Session:
             self.out(f"警告：回報 web 失敗（{type(e).__name__}: {e}），壓測繼續")
 
     def total_lines(self) -> list[str]:
-        return total_lines(self.totals, self.abandoned)
+        return total_lines(self.totals, self.abandoned, self.gave_up)
 
 
 async def run_load(
@@ -255,19 +288,21 @@ async def run_load(
     stop: asyncio.Event,
     out: Callable[[str], None] = print,
     max_inflight: int = MAX_INFLIGHT,
+    max_connections: int = LOCAL_MAX_CONNECTIONS,
     timeout_s: float = REQUEST_TIMEOUT_S,
     track_interval_s: float = TRACK_INTERVAL_S,
     target_transport: httpx.AsyncBaseTransport | None = None,
     web_transport: httpx.AsyncBaseTransport | None = None,
     on_window: Callable[[float, float, dict, dict, dict], None] | None = None,
     print_totals: bool = True,
-) -> tuple[dict[str, Window], dict[str, int]]:
+) -> tuple[dict[str, Window], dict[str, int], dict[str, int]]:
     """新顧客依到達速率出現，兩個目標相同速率、相同訂單內容；每位顧客追蹤到送達。
 
-    回傳各目標的累計統計與放棄追蹤數。
+    回傳各目標的累計統計、放棄追蹤數與放棄下單數。
     """
     session = Session(
-        targets, web_url, stop=stop, out=out, max_inflight=max_inflight, timeout_s=timeout_s,
+        targets, web_url, stop=stop, out=out, max_inflight=max_inflight, max_connections=max_connections,
+        timeout_s=timeout_s,
         track_interval_s=track_interval_s, target_transport=target_transport, web_transport=web_transport,
         on_window=on_window,
     )
@@ -280,7 +315,7 @@ async def run_load(
     if print_totals:
         for line in s.total_lines():
             out(line)
-    return s.totals, s.abandoned
+    return s.totals, s.abandoned, s.gave_up
 
 
 @dataclass
@@ -326,6 +361,7 @@ async def run_probe(
     session = Session(
         {name: url}, web_url, stop=stop, out=lambda line: out(line) if line.startswith("警告") else None,
         track_interval_s=track_interval_s, target_transport=target_transport, web_transport=web_transport,
+        order_attempts=1,  # 量測容量時不重試，失敗率才反映該階段的速率
         on_complete=on_complete,
     )
     capacity = None

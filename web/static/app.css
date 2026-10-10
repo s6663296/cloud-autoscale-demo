@@ -459,6 +459,10 @@ body:has(.screen:not([hidden]) > .bottom-bar:not([hidden])) .order-fab { bottom:
 .stats dt { font-size: 11px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stats dd { margin: 0; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .stats dd.small { font-size: 13px; font-weight: 600; }
+/* 失敗次數會列出多種失敗，佔兩欄並允許換行 */
+.stats div.wide { grid-column: span 2; }
+.stats .wide dd { white-space: normal; }
+.stats dd.fail { color: var(--critical); }
 .dash-charts { margin-top: 8px; }
 .dash-charts summary { font-size: 13px; font-weight: 600; color: var(--text-2); cursor: pointer; }
 .dash-charts .charts { margin-top: 4px; }

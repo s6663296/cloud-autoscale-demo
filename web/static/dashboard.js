@@ -1,9 +1,12 @@
 // Debug 儀表板：展開時建立 EventSource，收起時關閉。
 
-import { chartPath, formatMs, formatPct, TARGETS } from "./logic.js";
+import { chartPath, failureText, formatLatency, formatPct, latencyText, TARGETS } from "./logic.js";
 
 const NS = "http://www.w3.org/2000/svg";
 const NAME = { fixed: "固定版", auto: "擴展版" };
+const RPS_HINT = "最近 10 秒平均每秒完成的請求數，含下單與外送員位置更新。兩邊收到的新訂單一樣多，但下單失敗的顧客不會有後續的位置更新，所以撐不住的一方請求數會少很多";
+const FAILURE_HINT = "最近 10 秒內失敗的請求數。逾時：超過 10 秒沒有回應；忙碌：服務回覆 429 拒絕；錯誤：其他錯誤或無法連線";
+const LATENCY_HINT = "最近 10 秒內，下單與外送員位置更新的每一筆請求，從送出到收到回應的平均時間；逾時以 10 秒計，忙碌與錯誤不計入";
 // 圖表高度固定、寬度依實際版面，字級不會跟著縮放
 const H = 72;
 const PAD = { left: 34, right: 4, top: 6, bottom: 14 };
@@ -33,12 +36,12 @@ const METRICS = {
     tickLabel: (v) => `${Math.round(v * 100)}%`,
     format: formatPct,
   },
-  p95_ms: {
+  avg_ms: {
     // 對齊幾個好讀的上限，避免數值小幅變動時刻度一直跳
     max: (values) => [1000, 2000, 5000, 10000, 15000, 20000].find((m) => m >= Math.max(0, ...values)) ?? 30000,
     ticks: null,
     tickLabel: (v) => (v === 0 ? "0" : v < 1000 ? `${v} ms` : `${v / 1000} s`),
-    format: formatMs,
+    format: formatLatency,
   },
 };
 
@@ -73,7 +76,7 @@ export function initDashboard({ toggle, panel }) {
   toggle.addEventListener("click", () => (source ? close() : open()));
 
   function render(snap) {
-    status.textContent = `即時更新 · ${clock(snap.now)}`;
+    status.textContent = `最近 10 秒 · ${clock(snap.now)}`;
     for (const target of TARGETS) {
       renderStats(panel.querySelector(`.dash-target[data-target="${target}"] .stats`), snap.targets[target]);
     }
@@ -82,18 +85,20 @@ export function initDashboard({ toggle, panel }) {
 }
 
 function renderStats(dl, t) {
-  const f = t.failures;
+  const [latency, small] = latencyText(t);
+  const failed = Object.values(t.failures).some((n) => n > 0);
   const rows = [
-    ["個體數", String(t.instances)],
-    ["RPS", t.rps.toFixed(t.rps < 1 ? 2 : 1)],
-    ["每秒成功率", formatPct(t.success_rate)],
-    ["p50", formatMs(t.p50_ms)],
-    ["p95", formatMs(t.p95_ms)],
-    ["逾時/忙/錯", `${f.timeout}/${f.busy}/${f.error}`, "small"],
+    { label: "個體數", value: String(t.instances) },
+    { label: "每秒請求", value: t.rps.toFixed(t.rps < 10 ? 1 : 0), hint: RPS_HINT },
+    { label: "成功率", value: formatPct(t.success_rate) },
+    { label: "平均回應時間", value: latency, cls: small ? "small" : "", hint: LATENCY_HINT },
+    { label: "失敗次數", value: failureText(t.failures), cls: failed ? "small fail" : "small", hint: FAILURE_HINT, wide: true },
   ];
-  dl.replaceChildren(...rows.map(([label, value, cls]) => {
+  dl.replaceChildren(...rows.map(({ label, value, cls, hint, wide }) => {
     const div = document.createElement("div");
-    div.append(html("dt", label), html("dd", value, cls));
+    if (hint) div.title = hint; // 滑鼠停在欄位上時說明怎麼算
+    if (wide) div.className = "wide";
+    div.append(html("dt", label), html("dd", value, cls || undefined));
     return div;
   }));
 }

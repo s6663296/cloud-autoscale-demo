@@ -5,7 +5,10 @@ import {
   buildOrderBody,
   chartPath,
   fitView,
+  failureText,
+  formatLatency,
   formatMs,
+  latencyText,
   formatPct,
   makeOrderId,
   outcomeFromStatus,
@@ -96,6 +99,20 @@ test("formatPct 與 formatMs", () => {
   assert.equal(formatMs(null), "—");
   assert.equal(formatMs(412.4), "412 ms");
   assert.equal(formatMs(15000), "15.0 s");
+});
+
+test("formatLatency 逾時上限顯示為至少 10 秒", () => {
+  assert.equal(formatLatency(null), "—");
+  assert.equal(formatLatency(412.4), "412 ms");
+  assert.equal(formatLatency(9999), "10.0 s");
+  assert.equal(formatLatency(10000), "≥10 s");
+});
+
+test("latencyText 分辨沒有流量與全部失敗", () => {
+  assert.deepEqual(latencyText({ rps: 0, avg_ms: null }), ["—", false]);
+  assert.deepEqual(latencyText({ rps: 8.1, avg_ms: null }), ["全部失敗", true]);
+  assert.deepEqual(latencyText({ rps: 84, avg_ms: 159.4 }), ["159 ms", false]);
+  assert.deepEqual(latencyText({ rps: 8, avg_ms: 10000 }), ["≥10 s", false]);
 });
 
 // --- 購物車 ----------------------------------------------------------------
@@ -192,4 +209,10 @@ test("outskirtPaths 只畫城市外圍，主幹道沿原行列延伸", () => {
 test("riverLine 畫在兩列之間並延伸到外圍", () => {
   assert.deepEqual(riverLine({ size: 3, river: [1, 1, 0] }, 2), [[-2, 1.5], [0, 1.5], [1, 1.5], [2, 0.5], [4, 0.5]]);
   assert.deepEqual(riverLine({ size: 3, river: [] }, 2), []);
+});
+
+test("failureText 只列出有發生的失敗種類", () => {
+  assert.equal(failureText({ timeout: 0, busy: 0, error: 0 }), "無");
+  assert.equal(failureText({ timeout: 173, busy: 0, error: 0 }), "逾時 173");
+  assert.equal(failureText({ timeout: 173, busy: 5, error: 2 }), "逾時 173 · 忙碌 5 · 錯誤 2");
 });

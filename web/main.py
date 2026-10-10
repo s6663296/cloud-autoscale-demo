@@ -53,7 +53,8 @@ class TargetSummary(BaseModel):
     timeout: int = Field(0, ge=0)
     busy: int = Field(0, ge=0)
     error: int = Field(0, ge=0)
-    latency_samples_ms: list[float] = []
+    latency_sum_ms: float = Field(0, ge=0)  # ok 與 timeout 的延遲總和
+    latency_count: int = Field(0, ge=0)
     instance_ids: list[str] = []
 
 

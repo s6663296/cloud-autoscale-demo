@@ -1,26 +1,32 @@
-"""每秒彙總：依目標統計送出、完成、丟棄與延遲，轉成 web 回報內容與終端機輸出。"""
+"""每秒彙總：依目標統計送出、完成、丟棄與延遲，轉成 web 回報內容與終端機輸出。
 
-import math
-import random
+延遲與 web 儀表板的「平均回應時間」同一個定義（README 第 6 節）：下單與追蹤的每一筆 ok、timeout 都計入，
+只送總和與筆數，web 端算出的平均是精確值。
+"""
 
 OUTCOMES = ("ok", "timeout", "busy", "error")
-MAX_SAMPLES = 200
+LATENCY_OUTCOMES = ("ok", "timeout")
 
 
 class Window:
-    __slots__ = ("sent", "orders", "dropped", "counts", "latencies", "instance_ids")
+    __slots__ = ("sent", "orders", "dropped", "counts", "latency_sum_ms", "latency_count", "instance_ids")
 
     def __init__(self):
         self.sent = 0  # 送出的請求（下單與追蹤）
         self.orders = 0  # 其中的下單請求
         self.dropped = 0
         self.counts = dict.fromkeys(OUTCOMES, 0)
-        self.latencies: list[float] = []
+        self.latency_sum_ms = 0.0  # ok 與 timeout 的延遲總和
+        self.latency_count = 0
         self.instance_ids: set[str] = set()
 
     @property
     def failed(self) -> int:
         return self.counts["timeout"] + self.counts["busy"] + self.counts["error"]
+
+    @property
+    def avg_ms(self) -> float | None:
+        return self.latency_sum_ms / self.latency_count if self.latency_count else None
 
 
 def merge_windows(parts: list[dict[str, Window]]) -> dict[str, Window]:
@@ -34,7 +40,8 @@ def merge_windows(parts: list[dict[str, Window]]) -> dict[str, Window]:
             m.dropped += w.dropped
             for outcome, n in w.counts.items():
                 m.counts[outcome] += n
-            m.latencies.extend(w.latencies)
+            m.latency_sum_ms += w.latency_sum_ms
+            m.latency_count += w.latency_count
             m.instance_ids |= w.instance_ids
     return merged
 
@@ -56,7 +63,9 @@ class Aggregator:
     def completed(self, target: str, outcome: str, latency_ms: float, instance_id: str | None) -> None:
         w = self._windows[target]
         w.counts[outcome] += 1
-        w.latencies.append(latency_ms)
+        if outcome in LATENCY_OUTCOMES:
+            w.latency_sum_ms += latency_ms
+            w.latency_count += 1
         if instance_id:
             w.instance_ids.add(instance_id)
 
@@ -65,24 +74,19 @@ class Aggregator:
         return windows
 
 
-def report_payload(windows: dict[str, Window], rng: random.Random) -> dict:
+def report_payload(windows: dict[str, Window]) -> dict:
     """POST /api/reports/loadtest 的內容；dropped 只顯示在終端機，不回報。"""
-    targets = {}
-    for name, w in windows.items():
-        samples = w.latencies if len(w.latencies) <= MAX_SAMPLES else rng.sample(w.latencies, MAX_SAMPLES)
-        targets[name] = {
-            **w.counts,
-            "latency_samples_ms": [round(v, 1) for v in samples],
-            "instance_ids": sorted(w.instance_ids),
+    return {
+        "targets": {
+            name: {
+                **w.counts,
+                "latency_sum_ms": round(w.latency_sum_ms, 1),
+                "latency_count": w.latency_count,
+                "instance_ids": sorted(w.instance_ids),
+            }
+            for name, w in windows.items()
         }
-    return {"targets": targets}
-
-
-def p95(values: list[float]) -> float | None:
-    if not values:
-        return None
-    ordered = sorted(values)
-    return ordered[max(1, math.ceil(0.95 * len(ordered))) - 1]
+    }
 
 
 def format_ms(ms: float | None) -> str:
@@ -98,14 +102,16 @@ def summary_line(
     for name, w in windows.items():
         parts.append(
             f"{name} 下單 {w.orders} 請求 {w.sent} 成功 {w.counts['ok']} 失敗 {w.failed} 丟棄 {w.dropped} "
-            f"進行中 {inflight.get(name, 0)} 配送中 {delivering.get(name, 0)} p95 {format_ms(p95(w.latencies))}"
+            f"進行中 {inflight.get(name, 0)} 配送中 {delivering.get(name, 0)} 平均回應時間 {format_ms(w.avg_ms)}"
         )
     return " | ".join(parts)
 
 
-def total_lines(totals: dict[str, Window], abandoned: dict[str, int]) -> list[str]:
+def total_lines(totals: dict[str, Window], abandoned: dict[str, int], gave_up: dict[str, int] | None = None) -> list[str]:
+    gave_up = gave_up or {}
     return [
         f"{name} 共下單 {w.orders} 請求 {w.sent} 成功 {w.counts['ok']} 逾時 {w.counts['timeout']} "
-        f"忙碌 {w.counts['busy']} 錯誤 {w.counts['error']} 丟棄 {w.dropped} 放棄追蹤 {abandoned.get(name, 0)}"
+        f"忙碌 {w.counts['busy']} 錯誤 {w.counts['error']} 丟棄 {w.dropped} "
+        f"放棄下單 {gave_up.get(name, 0)} 放棄追蹤 {abandoned.get(name, 0)}"
         for name, w in totals.items()
     ]
