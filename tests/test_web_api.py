@@ -157,6 +157,8 @@ def test_index_and_static(client):
     assert 'data-metric="instances"' in res.text
     assert 'id="nickname-dialog"' in res.text
     assert 'id="nickname-chip"' in res.text
+    # 在輸入框按 Enter 會按下表單裡第一個送出按鈕，必須是「開始點餐」，不然打好的暱稱會被當成略過
+    assert res.text.index('value="save"') < res.text.index('value="skip"')
     assert 'id="dash-graph"' in res.text
     assert client.get("/static/graph.js").status_code == 200
 

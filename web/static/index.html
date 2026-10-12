@@ -169,9 +169,10 @@
       <h2 id="nickname-title">輸入暱稱</h2>
       <p class="muted">會顯示在 Debug 儀表板上，最多 12 個字。</p>
       <input id="nickname-input" name="nickname" maxlength="40" autocomplete="off" placeholder="例如：小明">
+      <!-- 在輸入框按 Enter 會按下第一個送出按鈕，所以「開始點餐」放前面，畫面上用 row-reverse 排在右邊 -->
       <div class="dialog-actions">
-        <button type="submit" value="skip" class="skip">略過</button>
         <button type="submit" value="save" class="primary">開始點餐</button>
+        <button type="submit" value="skip" class="skip">略過</button>
       </div>
     </form>
   </dialog>
