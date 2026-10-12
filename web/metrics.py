@@ -9,6 +9,7 @@
 """
 
 import time
+import unicodedata
 from typing import Callable
 
 TARGETS = ("fixed", "auto")
@@ -20,6 +21,17 @@ HISTORY_S = 600
 WINDOW_S = 10  # 卡片上所有指標共用的視窗，與趨勢圖每一點的長度相同
 SERIES_STEP_S = 10
 TIMEOUT_LATENCY_MS = 10000
+NEW_MACHINE_S = 30  # 第一次出現在這段時間內的機器標「新開機」
+IDLE_MACHINE_S = 60  # 最近 10 秒沒接單、但這段時間內接過的機器標「閒置」
+MAX_PHONES = 20  # 每台機器在 snapshot 中最多列出的暱稱數
+NICKNAME_MAX = 12
+GUEST_NAME = "訪客"
+
+
+def clean_nickname(name: str) -> str:
+    """去掉控制字元與頭尾空白、截到 12 個字；空的當成「訪客」。不改其他內容，前端一律以純文字顯示。"""
+    text = "".join(ch for ch in name if unicodedata.category(ch)[0] != "C").strip()
+    return text[:NICKNAME_MAX] or GUEST_NAME
 
 
 class _Cell:
@@ -31,13 +43,25 @@ class _Cell:
         self.latency_count = 0
 
 
+class _Machine:
+    """一台機器在某一秒處理過的手機與模擬顧客筆數。"""
+
+    __slots__ = ("clients", "loadtest", "loadtest_unknown")
+
+    def __init__(self):
+        self.clients: dict[str, str] = {}  # client_id → 暱稱
+        self.loadtest = 0
+        self.loadtest_unknown = False  # 舊版壓測只送 instance_ids，沒有每台的筆數
+
+
 class _Slot:
-    __slots__ = ("sec", "cells", "instances")
+    __slots__ = ("sec", "cells", "instances", "machines")
 
     def __init__(self, sec: int):
         self.sec = sec
         self.cells = {(t, s): _Cell() for t in TARGETS for s in SOURCES}
         self.instances: dict[str, set[str]] = {t: set() for t in TARGETS}
+        self.machines: dict[str, dict[str, _Machine]] = {t: {} for t in TARGETS}
 
 
 class Metrics:
@@ -45,28 +69,31 @@ class Metrics:
         self._clock = clock
         self._slots: list[_Slot | None] = [None] * HISTORY_S
         self._series_cache: dict[int, dict] = {}
+        self._first_seen: dict[str, dict[str, int]] = {t: {} for t in TARGETS}
+        self._last_seen: dict[str, dict[str, int]] = {t: {} for t in TARGETS}
 
     # --- 寫入 ---------------------------------------------------------------
 
-    def record_order(self, results: list[dict]) -> None:
+    def record_order(self, results: list[dict], client: dict | None = None) -> None:
         """觀眾訂單：一筆訂單在兩個目標的派單結果。"""
         slot = self._current_slot()
         for r in results:
-            self._record_student(slot, r)
+            self._record_student(slot, r, client)
 
-    def record_track(self, result: dict) -> None:
+    def record_track(self, result: dict, client: dict | None = None) -> None:
         """觀眾手機的單次追蹤結果，與下單一樣計入所有指標。"""
-        self._record_student(self._current_slot(), result)
+        self._record_student(self._current_slot(), result, client)
 
-    @staticmethod
-    def _record_student(slot: "_Slot", r: dict) -> None:
+    def _record_student(self, slot: "_Slot", r: dict, client: dict | None) -> None:
         cell = slot.cells[(r["target"], "student")]
         cell.counts[r["outcome"]] += 1
         if r["outcome"] in LATENCY_OUTCOMES:
             cell.latency_sum_ms += TIMEOUT_LATENCY_MS if r["outcome"] == "timeout" else r["latency_ms"]
             cell.latency_count += 1
         if r.get("instance_id"):
-            slot.instances[r["target"]].add(r["instance_id"])
+            machine = self._machine(slot, r["target"], r["instance_id"])
+            if client:
+                machine.clients[client["id"]] = clean_nickname(client.get("name", ""))
 
     def record_loadtest(self, targets: dict[str, dict]) -> None:
         """壓力測試每秒彙總；延遲已由壓測端加總（只含 ok 與 timeout）。"""
@@ -77,7 +104,19 @@ class Metrics:
                 cell.counts[outcome] += data.get(outcome, 0)
             cell.latency_sum_ms += data.get("latency_sum_ms", 0.0)
             cell.latency_count += data.get("latency_count", 0)
-            slot.instances[target].update(data.get("instance_ids", []))
+            counts = data.get("instance_counts") or {}
+            for instance_id in set(data.get("instance_ids", [])) | set(counts):
+                machine = self._machine(slot, target, instance_id)
+                if instance_id in counts:
+                    machine.loadtest += counts[instance_id]
+                else:
+                    machine.loadtest_unknown = True
+
+    def _machine(self, slot: "_Slot", target: str, instance_id: str) -> "_Machine":
+        slot.instances[target].add(instance_id)
+        self._first_seen[target].setdefault(instance_id, slot.sec)
+        self._last_seen[target][instance_id] = slot.sec
+        return slot.machines[target].setdefault(instance_id, _Machine())
 
     def _current_slot(self) -> _Slot:
         sec = int(self._clock())
@@ -121,6 +160,7 @@ class Metrics:
     def snapshot(self, now: float | None = None) -> dict:
         """卡片指標：最近 WINDOW_S 個已結束的秒。目前這一秒還在寫入，不採用。"""
         now_sec = int(self._clock() if now is None else now)
+        self._forget_old_machines(now_sec)
         window = self._slots_between(now_sec - WINDOW_S, now_sec)
 
         targets = {}
@@ -132,8 +172,50 @@ class Metrics:
                 "success_rate": s["success_rate"],
                 "avg_ms": s["avg_ms"],
                 "failures": s["failures"],
+                "machines": self._machines(now_sec, target, window),
             }
         return {"now": now_sec, "targets": targets, "series": self._series(now_sec)}
+
+    def _forget_old_machines(self, now_sec: int) -> None:
+        for target in TARGETS:
+            stale = [i for i, sec in self._last_seen[target].items() if sec < now_sec - HISTORY_S]
+            for instance_id in stale:
+                del self._last_seen[target][instance_id]
+                self._first_seen[target].pop(instance_id, None)
+
+    def _machines(self, now_sec: int, target: str, window: list[_Slot]) -> list[dict]:
+        """機器格子：最近 10 秒有接單的機器，加上 60 秒內接過、現在閒置的機器。"""
+        active: dict[str, dict] = {}
+        for slot in window:
+            for instance_id, m in slot.machines[target].items():
+                a = active.setdefault(instance_id, {"clients": {}, "loadtest": 0, "unknown": False})
+                a["clients"].update(m.clients)
+                a["loadtest"] += m.loadtest
+                a["unknown"] = a["unknown"] or m.loadtest_unknown
+        recent = self._slots_between(now_sec - IDLE_MACHINE_S, now_sec)
+        seen = set().union(*(slot.instances[target] for slot in recent)) if recent else set()
+        first_seen = self._first_seen[target]
+        ids = sorted(seen, key=lambda i: (first_seen.get(i, now_sec), i))
+        labels = _short_ids(ids)
+
+        machines = []
+        for instance_id in ids:
+            a = active.get(instance_id)
+            if a is None:
+                status, clients, loadtest = "idle", {}, 0
+            else:
+                status = "new" if first_seen.get(instance_id, now_sec) >= now_sec - NEW_MACHINE_S else "active"
+                clients, loadtest = a["clients"], None if a["unknown"] else a["loadtest"]
+            phones = sorted(({"name": name, "tag": cid[:8]} for cid, name in clients.items()),
+                            key=lambda p: (p["name"], p["tag"]))
+            machines.append({
+                "id": labels[instance_id],
+                "status": status,
+                "phones": phones[:MAX_PHONES],
+                "phone_count": len(clients),
+                "loadtest_requests": loadtest,
+            })
+        return machines
 
     def _series(self, now_sec: int) -> list[dict]:
         """已結束的區間不會再寫入（寫入一律落在目前時間），計算一次後快取。
@@ -172,3 +254,11 @@ class Metrics:
         if ids:
             return len(ids)
         return None if completed else 0
+
+
+def _short_ids(ids: list[str]) -> dict[str, str]:
+    """畫面上的機器編號：末 4 碼；同一邊有重複時改用末 8 碼。"""
+    short = {i: i[-4:] for i in ids}
+    if len(set(short.values())) < len(ids):
+        short = {i: i[-8:] for i in ids}
+    return short
