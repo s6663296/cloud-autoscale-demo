@@ -505,6 +505,10 @@ body:has(.screen:not([hidden]) > .bottom-bar:not([hidden])) .order-fab { bottom:
 .auto-stroke { stroke: var(--auto); }
 .fixed-fill { fill: var(--fixed); }
 .auto-fill { fill: var(--auto); }
+/* 機器數圖佔滿整列，放在成功率與回應時間上方；虛線是擴展版上限 */
+.chart-wide { grid-column: 1 / -1; }
+.chart-svg .cap-line { stroke-width: 1.5; stroke-dasharray: 5 4; }
+.chart-svg .cap-label { fill: var(--auto); font-weight: 600; }
 
 /* 窄螢幕：兩個追蹤區塊並排，縮小字級與留白 */
 @media (max-width: 599px) {

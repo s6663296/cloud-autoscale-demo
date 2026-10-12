@@ -123,6 +123,7 @@ def test_index_and_static(client):
     assert res.status_code == 200
     assert "text/html" in res.headers["content-type"]
     assert client.get("/static/index.html").status_code == 200
+    assert 'data-metric="instances"' in res.text
 
 
 # --- SSE（以真實的 uvicorn 驗證串流）----------------------------------------

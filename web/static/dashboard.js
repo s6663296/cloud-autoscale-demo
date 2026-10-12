@@ -1,12 +1,16 @@
 // Debug 儀表板：展開時建立 EventSource，收起時關閉。
 
-import { chartPath, failureText, formatLatency, formatPct, latencyText, TARGETS } from "./logic.js";
+import {
+  chartPath, countAxisMax, countTicks, failureText, formatLatency, formatPct, instancesLabel, latencyText,
+  stepPath, TARGETS,
+} from "./logic.js";
 
 const NS = "http://www.w3.org/2000/svg";
 const NAME = { fixed: "固定版", auto: "擴展版" };
 const RPS_HINT = "最近 10 秒平均每秒完成的請求數，含下單與外送員位置更新。兩邊收到的新訂單一樣多，但下單失敗的顧客不會有後續的位置更新，所以撐不住的一方請求數會少很多";
 const FAILURE_HINT = "最近 10 秒內失敗的請求數。逾時：超過 10 秒沒有回應；忙碌：服務回覆 429 拒絕；錯誤：其他錯誤或無法連線";
 const LATENCY_HINT = "最近 10 秒內，下單與外送員位置更新的每一筆請求，從送出到收到回應的平均時間；逾時以 10 秒計，忙碌與錯誤不計入";
+const DEFAULT_AUTO_MAX = 10; // /api/config 還沒載入前先用雲端的上限
 // 圖表高度固定、寬度依實際版面，字級不會跟著縮放
 const H = 72;
 const PAD = { left: 34, right: 4, top: 6, bottom: 14 };
@@ -29,17 +33,28 @@ function clock(t) {
   return new Date(t * 1000).toLocaleTimeString("zh-TW", { hour12: false });
 }
 
+const value = (point, target, key) => point[target][key] ?? null;
+
 const METRICS = {
+  instances: {
+    max: (values, options) => countAxisMax(values, options.autoMax),
+    ticks: countTicks,
+    tickLabel: (v) => String(v),
+    format: (v) => instancesLabel({ instances: v }),
+    tooltip: (cell) => instancesLabel(cell),
+    path: stepPath,
+    cap: true,
+  },
   success_rate: {
     max: () => 1,
-    ticks: [0, 0.5, 1],
+    ticks: () => [0, 0.5, 1],
     tickLabel: (v) => `${Math.round(v * 100)}%`,
     format: formatPct,
   },
   avg_ms: {
     // 對齊幾個好讀的上限，避免數值小幅變動時刻度一直跳
     max: (values) => [1000, 2000, 5000, 10000, 15000, 20000].find((m) => m >= Math.max(0, ...values)) ?? 30000,
-    ticks: null,
+    ticks: (max) => [0, max / 2, max],
     tickLabel: (v) => (v === 0 ? "0" : v < 1000 ? `${v} ms` : `${v / 1000} s`),
     format: formatLatency,
   },
@@ -47,7 +62,8 @@ const METRICS = {
 
 export function initDashboard({ toggle, panel }) {
   const status = panel.querySelector("#dash-status");
-  const charts = [...panel.querySelectorAll(".chart")].map(setupChart);
+  const options = { autoMax: DEFAULT_AUTO_MAX };
+  const charts = [...panel.querySelectorAll(".chart")].map((figure) => setupChart(figure, options));
   // 手機版預設收起趨勢圖，讓儀表板與兩個追蹤區塊擠得進同一個畫面
   panel.querySelector("#dash-charts").open = matchMedia("(min-width: 768px)").matches;
   let source = null;
@@ -82,6 +98,13 @@ export function initDashboard({ toggle, panel }) {
     }
     for (const chart of charts) chart.update(snap.series);
   }
+
+  return {
+    setAutoMax(n) {
+      options.autoMax = Number.isFinite(n) && n > 0 ? n : DEFAULT_AUTO_MAX;
+      for (const chart of charts) chart.redraw();
+    },
+  };
 }
 
 function renderStats(dl, t) {
@@ -94,18 +117,18 @@ function renderStats(dl, t) {
     { label: "平均回應時間", value: latency, cls: small ? "small" : "", hint: LATENCY_HINT },
     { label: "失敗次數", value: failureText(t.failures), cls: failed ? "small fail" : "small", hint: FAILURE_HINT, wide: true },
   ];
-  dl.replaceChildren(...rows.map(({ label, value, cls, hint, wide }) => {
+  dl.replaceChildren(...rows.map(({ label, value: text, cls, hint, wide }) => {
     const div = document.createElement("div");
     if (hint) div.title = hint; // 滑鼠停在欄位上時說明怎麼算
     if (wide) div.className = "wide";
-    div.append(html("dt", label), html("dd", value, cls || undefined));
+    div.append(html("dt", label), html("dd", text, cls || undefined));
     return div;
   }));
 }
 
-function setupChart(figure) {
-  const metric = METRICS[figure.dataset.metric];
+function setupChart(figure, options) {
   const key = figure.dataset.metric;
+  const metric = METRICS[key];
   const svg = figure.querySelector("svg");
   const legend = figure.querySelector(".legend");
   const tooltip = figure.querySelector(".tooltip");
@@ -118,15 +141,14 @@ function setupChart(figure) {
   function draw() {
     W = svg.clientWidth || W;
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-    const values = series.flatMap((p) => TARGETS.map((t) => p[t][key])).filter((v) => v !== null);
-    const max = metric.max(values);
+    const values = series.flatMap((p) => TARGETS.map((t) => value(p, t, key))).filter((v) => v !== null);
+    const max = metric.max(values, options);
     const n = Math.max(series.length - 1, 1);
     x = (i) => PAD.left + (i * (W - PAD.left - PAD.right)) / n;
     y = (v) => H - PAD.bottom - (v / max) * (H - PAD.top - PAD.bottom);
 
     svg.replaceChildren();
-    const ticks = metric.ticks ?? [0, max / 2, max];
-    for (const v of ticks) {
+    for (const v of metric.ticks(max)) {
       el("line", { x1: PAD.left, x2: W - PAD.right, y1: y(v), y2: y(v), class: v === 0 ? "baseline" : "grid" }, svg);
       const label = el("text", { x: PAD.left - 6, y: y(v) + 3, "text-anchor": "end", class: "tick" }, svg);
       label.textContent = metric.tickLabel(v);
@@ -137,9 +159,18 @@ function setupChart(figure) {
       }, svg);
       label.textContent = text;
     });
+    if (metric.cap) {
+      const cap = options.autoMax;
+      el("line", { x1: PAD.left, x2: W - PAD.right, y1: y(cap), y2: y(cap), class: "cap-line auto-stroke" }, svg);
+      // 虛線貼近頂端時把字放到線下方，避免撞到圖例
+      const labelY = y(cap) - PAD.top < 10 ? y(cap) + 11 : y(cap) - 3;
+      const label = el("text", { x: W - PAD.right, y: labelY, "text-anchor": "end", class: "tick cap-label" }, svg);
+      label.textContent = `上限 ${cap} 台`;
+    }
+    const path = metric.path ?? chartPath;
     for (const target of TARGETS) {
-      const values = series.map((p) => p[target][key]);
-      const d = chartPath(values, x, y);
+      const values = series.map((p) => value(p, target, key));
+      const d = path(values, x, y);
       if (d) el("path", { d, class: `line ${target}-stroke` }, svg);
       // 前後都沒有資料的點連不成線，改畫一個點
       values.forEach((v, i) => {
@@ -150,10 +181,10 @@ function setupChart(figure) {
     }
 
     legend.replaceChildren(...TARGETS.map((target) => {
-      const last = [...series].reverse().find((p) => p[target][key] !== null);
+      const last = [...series].reverse().find((p) => value(p, target, key) !== null);
       const item = html("span");
       item.title = NAME[target];
-      item.append(html("i", undefined, `swatch swatch-${target}`), html("strong", metric.format(last ? last[target][key] : null)));
+      item.append(html("i", undefined, `swatch swatch-${target}`), html("strong", metric.format(last ? value(last, target, key) : null)));
       return item;
     }));
     drawHover();
@@ -167,14 +198,15 @@ function setupChart(figure) {
     const p = series[hover];
     el("line", { x1: x(hover), x2: x(hover), y1: PAD.top, y2: H - PAD.bottom, class: "crosshair" }, svg);
     for (const target of TARGETS) {
-      const v = p[target][key];
+      const v = value(p, target, key);
       if (v !== null) el("circle", { cx: x(hover), cy: y(v), r: 4, class: `hover-dot ${target}-fill` }, svg);
     }
     tooltip.replaceChildren(
       html("div", `${clock(p.t)}–${clock(p.t + 10)}`, "muted"),
       ...TARGETS.map((target) => {
         const row = html("div");
-        row.append(html("i", undefined, `swatch swatch-${target}`), html("strong", metric.format(p[target][key])), NAME[target]);
+        const text = metric.tooltip ? metric.tooltip(p[target]) : metric.format(value(p, target, key));
+        row.append(html("i", undefined, `swatch swatch-${target}`), html("strong", text), NAME[target]);
         return row;
       }),
     );
@@ -204,6 +236,9 @@ function setupChart(figure) {
     update(next) {
       series = next;
       draw();
+    },
+    redraw() {
+      if (series.length) draw();
     },
   };
 }
