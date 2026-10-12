@@ -29,6 +29,7 @@
   <header class="topbar">
     <button id="back" class="icon-btn" type="button" aria-label="返回" hidden><svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg></button>
     <div class="brand"><span class="brand-mark"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-zap"/></svg></span>外送系統</div>
+    <button id="nickname-chip" class="nickname-chip" type="button" hidden aria-label="修改暱稱">暱稱：<span></span></button>
     <button id="debug-toggle" class="debug-toggle" type="button" aria-expanded="false" aria-controls="dashboard"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg>Debug</button>
   </header>
 
@@ -156,6 +157,18 @@
     <svg class="icon" aria-hidden="true"><use href="#i-bike"/></svg>
     <span class="fab-label" aria-hidden="true"></span>
   </button>
+
+  <dialog id="nickname-dialog" class="nickname-dialog" aria-labelledby="nickname-title">
+    <form method="dialog">
+      <h2 id="nickname-title">輸入暱稱</h2>
+      <p class="muted">會顯示在 Debug 儀表板上，最多 12 個字。</p>
+      <input id="nickname-input" name="nickname" maxlength="40" autocomplete="off" placeholder="例如：小明">
+      <div class="dialog-actions">
+        <button type="submit" value="skip" class="skip">略過</button>
+        <button type="submit" value="save" class="primary">開始點餐</button>
+      </div>
+    </form>
+  </dialog>
 
   <template id="track-template">
     <article class="track">

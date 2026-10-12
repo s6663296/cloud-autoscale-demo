@@ -43,8 +43,55 @@ export function trackReportBody(target, r) {
   };
 }
 
-export function reportBody(orderId, results) {
-  return { order_id: orderId, results: TARGETS.map((target) => trackReportBody(target, results[target])) };
+export function reportBody(orderId, results, client = null) {
+  return withClient({ order_id: orderId, results: TARGETS.map((target) => trackReportBody(target, results[target])) }, client);
+}
+
+/** 回報 web 時附上手機的暱稱與隨機編號；沒有時不帶這個欄位。 */
+export function withClient(body, client) {
+  return client ? { ...body, client } : body;
+}
+
+// --- 暱稱 ------------------------------------------------------------------
+
+const NICKNAME_MAX = 12;
+export const GUEST_NAME = "訪客";
+
+/** 與 web 端 clean_nickname 相同的規則：去控制字元與頭尾空白、截 12 個字（以 Unicode 字元計），空的當「訪客」。 */
+export function normalizeNickname(s) {
+  const text = String(s ?? "").replace(/\p{C}/gu, "").trim();
+  return Array.from(text).slice(0, NICKNAME_MAX).join("") || GUEST_NAME;
+}
+
+/** 讀取手機的身分；localStorage 不能用（無痕模式等）時只在這次開啟期間有效。 */
+export function loadIdentity(storage, newId = makeOrderId) {
+  let clientId = null;
+  let nickname = null;
+  try {
+    clientId = storage.getItem("client_id");
+    nickname = storage.getItem("nickname");
+  } catch {
+    // 存不了就當第一次來
+  }
+  if (!clientId) {
+    clientId = newId();
+    try {
+      storage.setItem("client_id", clientId);
+    } catch {
+      // 下次打開會再產生一個新的
+    }
+  }
+  return { clientId, nickname };
+}
+
+export function saveNickname(storage, name) {
+  const clean = normalizeNickname(name);
+  try {
+    storage.setItem("nickname", clean);
+  } catch {
+    // 存不了只影響下次打開要不要再問
+  }
+  return clean;
 }
 
 // --- 外送員動畫 ------------------------------------------------------------

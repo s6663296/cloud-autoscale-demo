@@ -7,6 +7,10 @@ import {
   countAxisMax,
   countTicks,
   instancesLabel,
+  loadIdentity,
+  normalizeNickname,
+  saveNickname,
+  withClient,
   stepPath,
   fitView,
   failureText,
@@ -245,4 +249,46 @@ test("failureText 只列出有發生的失敗種類", () => {
   assert.equal(failureText({ timeout: 0, busy: 0, error: 0 }), "無");
   assert.equal(failureText({ timeout: 173, busy: 0, error: 0 }), "逾時 173");
   assert.equal(failureText({ timeout: 173, busy: 5, error: 2 }), "逾時 173 · 忙碌 5 · 錯誤 2");
+});
+
+test("normalizeNickname 去控制字元與空白、截 12 字、空的變訪客", () => {
+  assert.equal(normalizeNickname("  小明 "), "小明");
+  assert.equal(normalizeNickname(""), "訪客");
+  assert.equal(normalizeNickname("a\u0000b​c"), "abc");
+  assert.equal(normalizeNickname("一二三四五六七八九十甲乙丙"), "一二三四五六七八九十甲乙");
+  assert.equal(normalizeNickname("😀😀😀😀😀😀😀😀😀😀😀😀😀"), "😀😀😀😀😀😀😀😀😀😀😀😀");
+});
+
+function memoryStorage(initial = {}) {
+  const data = { ...initial };
+  return { getItem: (k) => (k in data ? data[k] : null), setItem: (k, v) => { data[k] = String(v); }, data };
+}
+
+test("loadIdentity 第一次產生編號並記住，之後沿用", () => {
+  const storage = memoryStorage();
+  const first = loadIdentity(storage, () => "id-1");
+  assert.deepEqual(first, { clientId: "id-1", nickname: null });
+  assert.equal(storage.data.client_id, "id-1");
+  storage.setItem("nickname", "小明");
+  assert.deepEqual(loadIdentity(storage, () => "id-2"), { clientId: "id-1", nickname: "小明" });
+});
+
+test("localStorage 不能用時仍然可以運作", () => {
+  const broken = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
+  assert.deepEqual(loadIdentity(broken, () => "id-3"), { clientId: "id-3", nickname: null });
+  assert.deepEqual(loadIdentity(null, () => "id-4"), { clientId: "id-4", nickname: null });
+  assert.equal(saveNickname(broken, "  阿華 "), "阿華");
+  assert.equal(saveNickname(null, ""), "訪客");
+});
+
+test("withClient 與 reportBody 帶上 client", () => {
+  const client = { id: "c1", name: "小明" };
+  assert.deepEqual(withClient({ a: 1 }, client), { a: 1, client });
+  assert.deepEqual(withClient({ a: 1 }, null), { a: 1 });
+  const results = {
+    fixed: { outcome: "timeout", latencyMs: 10000, instanceId: null },
+    auto: { outcome: "ok", latencyMs: 412.4, instanceId: "i1" },
+  };
+  assert.equal(reportBody("o1", results, client).client, client);
+  assert.equal("client" in reportBody("o1", results), false);
 });

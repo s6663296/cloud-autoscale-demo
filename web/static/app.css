@@ -443,6 +443,17 @@ body[data-screen="tracking"] .screens { max-width: 1040px; }
 /* 畫面底部有按鈕列時，懸浮球往上讓開 */
 body:has(.screen:not([hidden]) > .bottom-bar:not([hidden])) .order-fab { bottom: calc(96px + env(safe-area-inset-bottom)); }
 
+/* --- 暱稱 --- */
+.nickname-chip { margin-left: auto; margin-right: 8px; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-2); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+.nickname-chip span { color: var(--text); font-weight: 600; }
+.nickname-dialog { border: none; border-radius: var(--radius); padding: 20px; width: min(320px, calc(100vw - 32px)); box-shadow: var(--shadow-md); }
+.nickname-dialog::backdrop { background: rgba(20, 10, 50, 0.35); }
+.nickname-dialog h2 { font-size: 17px; margin: 0 0 4px; }
+.nickname-dialog input { width: 100%; margin: 12px 0; padding: 10px; font-size: 16px; border: 1px solid var(--input-line); border-radius: 10px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+/* 「開始點餐」沿用現有的 .primary；「略過」是次要按鈕 */
+.nickname-dialog .skip { border: 1px solid var(--line); background: none; border-radius: 10px; padding: 14px 20px; font-weight: 600; color: var(--text-2); }
+
 /* --- Debug 儀表板 --- */
 
 .dashboard {
