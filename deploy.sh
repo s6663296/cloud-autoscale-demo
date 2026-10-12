@@ -74,8 +74,8 @@ cmd_deploy() {
 
     echo "== Deploying services (same image) =="
     deploy_service dispatch-fixed dispatch 1 4 30 --cpu-boost
-    deploy_service dispatch-auto  dispatch 8 4 30 --cpu-boost
-    deploy_service web            web      1 250 3600
+    deploy_service dispatch-auto  dispatch 10 4 30 --cpu-boost
+    deploy_service web            web      1 250 300
 
     echo "== Wiring URLs =="
     local fixed auto web

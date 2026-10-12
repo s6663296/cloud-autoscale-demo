@@ -66,6 +66,8 @@ PIDS+=($!)
 
 export FIXED_URL="http://localhost:8001"
 export AUTO_URL="http://localhost:8002"
+# The local dispatch-auto has 8 workers, so the dashboard's cap line is 8 here (10 on Cloud Run).
+export AUTO_MAX_INSTANCES=8
 .venv/bin/python -m uvicorn web.main:app --port 8000 &
 PIDS+=($!)
 

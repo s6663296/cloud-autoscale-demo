@@ -29,6 +29,7 @@
   <header class="topbar">
     <button id="back" class="icon-btn" type="button" aria-label="返回" hidden><svg class="icon" aria-hidden="true"><use href="#i-chevron-left"/></svg></button>
     <div class="brand"><span class="brand-mark"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-zap"/></svg></span>外送系統</div>
+    <button id="nickname-chip" class="nickname-chip" type="button" hidden aria-label="修改暱稱">暱稱：<span></span></button>
     <button id="debug-toggle" class="debug-toggle" type="button" aria-expanded="false" aria-controls="dashboard"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg>Debug</button>
   </header>
 
@@ -125,9 +126,21 @@
           <dl class="stats"></dl>
         </article>
       </div>
+      <details id="dash-graph" class="dash-graph">
+        <summary>請求流向（最近 10 秒）</summary>
+        <svg class="graph-svg" role="img" aria-label="請求流向：同學在中間，左邊是固定版的機器，右邊是擴展版的機器"></svg>
+        <p class="graph-legend muted">每一筆手機請求是一顆小點，從手機飛到處理它的機器；紅點是沒接到的請求。線越粗，代表模擬顧客的請求越多。</p>
+        <p class="graph-unserved" hidden></p>
+      </details>
       <details id="dash-charts" class="dash-charts">
         <summary>趨勢圖（最近 10 分鐘）</summary>
         <div class="charts">
+          <figure class="chart chart-wide" data-metric="instances">
+            <figcaption title="每 10 秒內有處理請求的機器數；只有成功的回應帶得回機器編號">機器數</figcaption>
+            <div class="legend"></div>
+            <svg class="chart-svg" role="img" aria-label="機器數趨勢"></svg>
+            <div class="tooltip" hidden></div>
+          </figure>
           <figure class="chart" data-metric="success_rate">
             <figcaption>成功率</figcaption>
             <div class="legend"></div>
@@ -150,6 +163,19 @@
     <svg class="icon" aria-hidden="true"><use href="#i-bike"/></svg>
     <span class="fab-label" aria-hidden="true"></span>
   </button>
+
+  <dialog id="nickname-dialog" class="nickname-dialog" aria-labelledby="nickname-title">
+    <form method="dialog">
+      <h2 id="nickname-title">輸入暱稱</h2>
+      <p class="muted">會顯示在 Debug 儀表板上，最多 12 個字。</p>
+      <input id="nickname-input" name="nickname" maxlength="40" autocomplete="off" placeholder="例如：小明">
+      <!-- 在輸入框按 Enter 會按下第一個送出按鈕，所以「開始點餐」放前面，畫面上用 row-reverse 排在右邊 -->
+      <div class="dialog-actions">
+        <button type="submit" value="save" class="primary">開始點餐</button>
+        <button type="submit" value="skip" class="skip">略過</button>
+      </div>
+    </form>
+  </dialog>
 
   <template id="track-template">
     <article class="track">
