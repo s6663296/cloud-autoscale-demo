@@ -2,6 +2,7 @@
 
 延遲與 web 儀表板的「平均回應時間」同一個定義（README 第 6 節）：下單與追蹤的每一筆 ok、timeout 都計入，
 只送總和與筆數，web 端算出的平均是精確值。
+每台機器的成功筆數（instance_counts）供 web 的機器格子使用；instance_ids 繼續送以相容舊版 web。
 """
 
 OUTCOMES = ("ok", "timeout", "busy", "error")
@@ -9,7 +10,8 @@ LATENCY_OUTCOMES = ("ok", "timeout")
 
 
 class Window:
-    __slots__ = ("sent", "orders", "dropped", "counts", "latency_sum_ms", "latency_count", "instance_ids")
+    __slots__ = ("sent", "orders", "dropped", "counts", "latency_sum_ms", "latency_count", "instance_ids",
+                 "instance_counts")
 
     def __init__(self):
         self.sent = 0  # 送出的請求（下單與追蹤）
@@ -19,6 +21,7 @@ class Window:
         self.latency_sum_ms = 0.0  # ok 與 timeout 的延遲總和
         self.latency_count = 0
         self.instance_ids: set[str] = set()
+        self.instance_counts: dict[str, int] = {}  # 每台機器處理的成功請求筆數
 
     @property
     def failed(self) -> int:
@@ -43,6 +46,8 @@ def merge_windows(parts: list[dict[str, Window]]) -> dict[str, Window]:
             m.latency_sum_ms += w.latency_sum_ms
             m.latency_count += w.latency_count
             m.instance_ids |= w.instance_ids
+            for instance_id, n in w.instance_counts.items():
+                m.instance_counts[instance_id] = m.instance_counts.get(instance_id, 0) + n
     return merged
 
 
@@ -68,6 +73,7 @@ class Aggregator:
             w.latency_count += 1
         if instance_id:
             w.instance_ids.add(instance_id)
+            w.instance_counts[instance_id] = w.instance_counts.get(instance_id, 0) + 1
 
     def flush(self) -> dict[str, Window]:
         windows, self._windows = self._windows, {t: Window() for t in self.targets}
@@ -83,6 +89,7 @@ def report_payload(windows: dict[str, Window]) -> dict:
                 "latency_sum_ms": round(w.latency_sum_ms, 1),
                 "latency_count": w.latency_count,
                 "instance_ids": sorted(w.instance_ids),
+                "instance_counts": dict(sorted(w.instance_counts.items())),
             }
             for name, w in windows.items()
         }

@@ -113,8 +113,10 @@ def test_aggregate_counts_and_latency_sum():
     assert (fixed["ok"], fixed["timeout"], fixed["busy"], fixed["error"]) == (500, 7, 1, 1)
     assert (fixed["latency_sum_ms"], fixed["latency_count"]) == (sum(range(500)) + 70000, 507)
     assert sorted(fixed["instance_ids"]) == ["inst-a", "inst-b"]
+    assert fixed["instance_counts"] == {"inst-a": 250, "inst-b": 250}
     assert payload["targets"]["auto"] == {
-        "ok": 0, "timeout": 0, "busy": 0, "error": 0, "latency_sum_ms": 0, "latency_count": 0, "instance_ids": [],
+        "ok": 0, "timeout": 0, "busy": 0, "error": 0, "latency_sum_ms": 0, "latency_count": 0,
+        "instance_ids": [], "instance_counts": {},
     }
     assert windows["fixed"].sent == 500 and windows["auto"].dropped == 1
     assert "dropped" not in json.dumps(payload)
@@ -496,11 +498,12 @@ def test_requests_rotate_across_pool_shards(monkeypatch):
 # --- 多程序 -------------------------------------------------------------------
 
 
-def _window(ok=0, timeout=0, latencies=(), ids=(), sent=None, orders=0, dropped=0):
+def _window(ok=0, timeout=0, latencies=(), ids=(), sent=None, orders=0, dropped=0, counts=None):
     w = Window()
     w.counts["ok"], w.counts["timeout"] = ok, timeout
     w.latency_sum_ms, w.latency_count = float(sum(latencies)), len(latencies)
     w.instance_ids = set(ids)
+    w.instance_counts = dict(counts or {})
     w.sent = ok + timeout if sent is None else sent
     w.orders, w.dropped = orders, dropped
     return w
@@ -519,9 +522,17 @@ def test_merge_windows_adds_counts_and_unions_instances():
     assert merged["fixed"].counts["ok"] == 1
 
 
+def test_merge_windows_adds_instance_counts():
+    merged = merge_windows([
+        {"auto": _window(ok=3, ids=["a", "b"], counts={"a": 2, "b": 1})},
+        {"auto": _window(ok=2, ids=["a"], counts={"a": 2})},
+    ])
+    assert merged["auto"].instance_counts == {"a": 4, "b": 1}
+
+
 def test_window_survives_pickle():
-    w = pickle.loads(pickle.dumps(_window(ok=1, latencies=[1.5], ids=["x"])))
-    assert (w.counts["ok"], w.latency_sum_ms, w.latency_count, w.instance_ids) == (1, 1.5, 1, {"x"})
+    w = pickle.loads(pickle.dumps(_window(ok=1, latencies=[1.5], ids=["x"], counts={"x": 1})))
+    assert (w.counts["ok"], w.latency_sum_ms, w.latency_count, w.instance_ids, w.instance_counts) == (1, 1.5, 1, {"x"}, {"x": 1})
 
 
 def test_merger_prints_once_all_processes_report():
