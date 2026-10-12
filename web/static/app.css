@@ -443,6 +443,17 @@ body[data-screen="tracking"] .screens { max-width: 1040px; }
 /* 畫面底部有按鈕列時，懸浮球往上讓開 */
 body:has(.screen:not([hidden]) > .bottom-bar:not([hidden])) .order-fab { bottom: calc(96px + env(safe-area-inset-bottom)); }
 
+/* --- 暱稱 --- */
+.nickname-chip { margin-left: auto; margin-right: 8px; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-2); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+.nickname-chip span { color: var(--text); font-weight: 600; }
+.nickname-dialog { border: none; border-radius: var(--radius); padding: 20px; width: min(320px, calc(100vw - 32px)); box-shadow: var(--shadow-md); }
+.nickname-dialog::backdrop { background: rgba(20, 10, 50, 0.35); }
+.nickname-dialog h2 { font-size: 17px; margin: 0 0 4px; }
+.nickname-dialog input { width: 100%; margin: 12px 0; padding: 10px; font-size: 16px; border: 1px solid var(--input-line); border-radius: 10px; }
+.dialog-actions { display: flex; flex-direction: row-reverse; justify-content: flex-start; gap: 8px; }
+/* 「開始點餐」沿用現有的 .primary；「略過」是次要按鈕 */
+.nickname-dialog .skip { border: 1px solid var(--line); background: none; border-radius: 10px; padding: 14px 20px; font-weight: 600; color: var(--text-2); }
+
 /* --- Debug 儀表板 --- */
 
 .dashboard {
@@ -470,6 +481,33 @@ body:has(.screen:not([hidden]) > .bottom-bar:not([hidden])) .order-fab { bottom:
 .dash-charts { margin-top: 8px; }
 .dash-charts summary { font-size: 13px; font-weight: 600; color: var(--text-2); cursor: pointer; }
 .dash-charts .charts { margin-top: 4px; }
+/* 請求流向圖：同學在中間、固定版在左、擴展版在右 */
+.dash-graph { margin-top: 8px; }
+.dash-graph summary { font-size: 13px; font-weight: 600; color: var(--text-2); cursor: pointer; }
+.graph-svg { display: block; width: 100%; height: 200px; overflow: visible; margin-top: 4px; }
+.graph-svg .edge-lt { stroke-opacity: 0.28; stroke-linecap: round; }
+.graph-svg .edge-phone { stroke-opacity: 0.22; stroke-width: 1; }
+.graph-svg .phone-dot { fill: var(--text-2); }
+.graph-svg .phone-dot.you { fill: var(--brand); }
+.graph-svg .loadtest-node { fill: var(--muted); }
+.graph-svg .node-label { font-size: 10px; fill: var(--text-2); }
+.graph-svg .node-label.you { fill: var(--brand); font-weight: 700; }
+.graph-svg .machine-label { font-weight: 700; fill: var(--text); }
+.graph-svg .graph-title { font-size: 11px; font-weight: 700; fill: var(--text-2); }
+.graph-svg .fixed-text { fill: var(--fixed); }
+.graph-svg .auto-text { fill: var(--auto); }
+.graph-svg .machine-node { stroke: var(--surface); stroke-width: 2; }
+.graph-svg .machine-node.idle { opacity: 0.35; }
+.graph-svg .machine-node.down { fill: var(--critical); }
+.graph-svg .machine-node.new { animation: node-pop 0.6s ease-out; }
+.graph-svg .badge { font-size: 10px; font-weight: 700; }
+.graph-svg .badge.new { fill: var(--good); }
+.graph-svg .badge.idle { fill: var(--muted); }
+.graph-svg .badge.down { fill: var(--critical); }
+.graph-svg .flow-dot.fail { fill: var(--critical); }
+.graph-legend, .graph-unserved { margin: 4px 0 0; font-size: 11px; }
+.graph-unserved { font-weight: 600; color: var(--critical); white-space: pre-line; }
+@keyframes node-pop { from { transform-box: fill-box; transform-origin: center; transform: scale(0.3); } to { transform-box: fill-box; transform-origin: center; transform: scale(1); } }
 
 /* 兩張小圖一律左右並排；標題與最新值同一行 */
 .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; }
@@ -505,11 +543,15 @@ body:has(.screen:not([hidden]) > .bottom-bar:not([hidden])) .order-fab { bottom:
 .auto-stroke { stroke: var(--auto); }
 .fixed-fill { fill: var(--fixed); }
 .auto-fill { fill: var(--auto); }
+/* 機器數圖佔滿整列，放在成功率與回應時間上方；虛線是擴展版上限 */
+.chart-wide { grid-column: 1 / -1; }
+.chart-svg .cap-line { stroke-width: 1.5; stroke-dasharray: 5 4; }
+.chart-svg .cap-label { fill: var(--auto); font-weight: 600; }
 
 /* 窄螢幕：兩個追蹤區塊並排，縮小字級與留白 */
 @media (max-width: 599px) {
   .dashboard { padding: 8px 0; }
-  .dash-head, .dash-charts { padding: 0 8px; }
+  .dash-head, .dash-charts, .dash-graph { padding: 0 8px; }
   .dash-targets, #tracks { gap: 6px; }
   .dash-target { padding: 6px; border-radius: 8px; }
   .dash-target h3 { font-size: 12px; }
@@ -553,4 +595,5 @@ body:has(.screen:not([hidden]) > .bottom-bar:not([hidden])) .order-fab { bottom:
   .skeleton .thumb, .skeleton .body span, .order-fab::before { animation: none; }
   button, .more-fields summary .icon { transition: none; }
   button:not(:disabled):active, .restaurant-card:hover { transform: none; }
+  .graph-svg .machine-node.new { animation: none; }
 }

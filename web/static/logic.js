@@ -43,8 +43,55 @@ export function trackReportBody(target, r) {
   };
 }
 
-export function reportBody(orderId, results) {
-  return { order_id: orderId, results: TARGETS.map((target) => trackReportBody(target, results[target])) };
+export function reportBody(orderId, results, client = null) {
+  return withClient({ order_id: orderId, results: TARGETS.map((target) => trackReportBody(target, results[target])) }, client);
+}
+
+/** 回報 web 時附上手機的暱稱與隨機編號；沒有時不帶這個欄位。 */
+export function withClient(body, client) {
+  return client ? { ...body, client } : body;
+}
+
+// --- 暱稱 ------------------------------------------------------------------
+
+const NICKNAME_MAX = 12;
+export const GUEST_NAME = "訪客";
+
+/** 與 web 端 clean_nickname 相同的規則：去控制字元與頭尾空白、截 12 個字（以 Unicode 字元計），空的當「訪客」。 */
+export function normalizeNickname(s) {
+  const text = String(s ?? "").replace(/\p{C}/gu, "").trim();
+  return Array.from(text).slice(0, NICKNAME_MAX).join("") || GUEST_NAME;
+}
+
+/** 讀取手機的身分；localStorage 不能用（無痕模式等）時只在這次開啟期間有效。 */
+export function loadIdentity(storage, newId = makeOrderId) {
+  let clientId = null;
+  let nickname = null;
+  try {
+    clientId = storage.getItem("client_id");
+    nickname = storage.getItem("nickname");
+  } catch {
+    // 存不了就當第一次來
+  }
+  if (!clientId) {
+    clientId = newId();
+    try {
+      storage.setItem("client_id", clientId);
+    } catch {
+      // 下次打開會再產生一個新的
+    }
+  }
+  return { clientId, nickname };
+}
+
+export function saveNickname(storage, name) {
+  const clean = normalizeNickname(name);
+  try {
+    storage.setItem("nickname", clean);
+  } catch {
+    // 存不了只影響下次打開要不要再問
+  }
+  return clean;
 }
 
 // --- 外送員動畫 ------------------------------------------------------------
@@ -176,6 +223,38 @@ export function chartPath(values, x, y) {
   return d;
 }
 
+/** 階梯線 path：台數一格一格變化，先水平延續上一個值再垂直跳到新值；值為 null 時斷開。 */
+export function stepPath(values, x, y) {
+  let d = "";
+  let penDown = false;
+  values.forEach((v, i) => {
+    if (v === null || v === undefined) {
+      penDown = false;
+      return;
+    }
+    d += penDown ? `H${round1(x(i))}V${round1(y(v))}` : `M${round1(x(i))} ${round1(y(v))}`;
+    penDown = true;
+  });
+  return d;
+}
+
+/** 機器數圖的 Y 軸最大值：上限與資料最大值取大，至少為 1。 */
+export function countAxisMax(values, cap) {
+  return Math.max(1, cap || 0, ...values);
+}
+
+/** 機器數圖的刻度：0、一半（無條件進位）、最大值，只標整數、不重複。 */
+export function countTicks(max) {
+  return [...new Set([0, Math.ceil(max / 2), max])];
+}
+
+/** 機器數的文字：有請求卻拿不到機器編號時明講，不要顯示成沒有資料。 */
+export function instancesLabel(cell) {
+  const n = cell.instances;
+  if (n === null || n === undefined) return cell.success_rate === 0 ? "全部失敗，拿不到機器編號" : "—";
+  return `${n} 台`;
+}
+
 export function formatPct(rate) {
   return rate === null || rate === undefined ? "—" : `${Math.round(rate * 100)}%`;
 }
@@ -203,6 +282,61 @@ export function failureText(failures) {
 export function latencyText(t) {
   if (t.avg_ms !== null && t.avg_ms !== undefined) return [formatLatency(t.avg_ms), false];
   return t.rps > 0 ? ["全部失敗", true] : ["—", false];
+}
+
+// --- 請求流向圖 -------------------------------------------------------------
+
+/** 中間一欄的同學：兩邊 machines[].phones 與 requests 的聯集，依暱稱排序；超過上限時一定保留自己。 */
+export function graphPhones(targets, myTag, max = 20) {
+  const byTag = new Map();
+  for (const target of TARGETS) {
+    for (const m of targets[target]?.machines ?? []) for (const p of m.phones ?? []) byTag.set(p.tag, p.name);
+    for (const r of targets[target]?.requests ?? []) byTag.set(r.tag, r.name);
+  }
+  const order = (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.tag < b.tag ? -1 : 1);
+  let list = [...byTag].map(([tag, name]) => ({ tag, name, you: myTag !== null && tag === myTag })).sort(order);
+  if (list.length > max) {
+    const mine = list.filter((p) => p.you);
+    list = [...mine, ...list.filter((p) => !p.you).slice(0, max - mine.length)].sort(order);
+  }
+  return list;
+}
+
+/** n 個節點在 top～bottom 之間平均分配；只有一個時放中間。 */
+export function columnPositions(n, top, bottom) {
+  if (n <= 0) return [];
+  if (n === 1) return [(top + bottom) / 2];
+  return Array.from({ length: n }, (_, i) => top + (i * (bottom - top)) / (n - 1));
+}
+
+/** 模擬顧客的線寬：依筆數開根號，最粗 6；沒有筆數不畫。 */
+export function edgeWidth(n, max) {
+  if (!n || n <= 0) return 0;
+  return round1(1 + 5 * Math.sqrt(n / Math.max(max, 1)));
+}
+
+/** 模擬顧客每台機器每秒飛幾顆小點：約每 20 筆一顆，最多 5 顆。 */
+export function loadtestDotCount(requests) {
+  if (!requests || requests <= 0) return 0;
+  return Math.min(5, Math.ceil(requests / 10 / 20));
+}
+
+const MACHINE_BADGE = { new: "新開機", idle: "閒置" };
+
+/** 機器節點的樣式與標籤。unresponsive：這一邊有失敗卻沒有機器在接單，閒置的機器改標「沒有回應」。 */
+export function machineNodeState(m, unresponsive) {
+  if (unresponsive && m.status === "idle") return { tone: "down", badge: "沒有回應" };
+  return { tone: m.status, badge: MACHINE_BADGE[m.status] ?? null };
+}
+
+const hasFailures = (failures) => Object.values(failures ?? {}).some((n) => n > 0);
+
+export function sideUnresponsive(machines, failures) {
+  return hasFailures(failures) && !machines.some((m) => m.status === "new" || m.status === "active");
+}
+
+export function unservedText(name, failures) {
+  return hasFailures(failures) ? `${name}沒接到的請求：${failureText(failures)}` : "";
 }
 
 // --- 購物車 ----------------------------------------------------------------

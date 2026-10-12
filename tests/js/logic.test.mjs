@@ -4,6 +4,21 @@ import { test } from "node:test";
 import {
   buildOrderBody,
   chartPath,
+  columnPositions,
+  edgeWidth,
+  graphPhones,
+  loadtestDotCount,
+  machineNodeState,
+  sideUnresponsive,
+  unservedText,
+  countAxisMax,
+  countTicks,
+  instancesLabel,
+  loadIdentity,
+  normalizeNickname,
+  saveNickname,
+  withClient,
+  stepPath,
   fitView,
   failureText,
   formatLatency,
@@ -90,6 +105,32 @@ test("chartPath 遇到 null 斷開線段", () => {
   const values = [1, null, 0.5, 0.6];
   const d = chartPath(values, (i) => i * 10, (v) => 100 - v * 100);
   assert.equal(d, "M0 0M20 50L30 40");
+});
+
+test("stepPath 畫階梯線、遇到 null 斷開", () => {
+  const d = stepPath([1, 1, 3, null, 2], (i) => i * 10, (v) => v);
+  assert.equal(d, "M0 1H10V1H20V3M40 2");
+  assert.equal(stepPath([null, null], (i) => i, (v) => v), "");
+});
+
+test("countAxisMax 取上限與資料最大值，至少為 1", () => {
+  assert.equal(countAxisMax([1, 7], 10), 10);
+  assert.equal(countAxisMax([12], 10), 12);
+  assert.equal(countAxisMax([], 0), 1);
+});
+
+test("countTicks 只標整數且不重複", () => {
+  assert.deepEqual(countTicks(10), [0, 5, 10]);
+  assert.deepEqual(countTicks(7), [0, 4, 7]);
+  assert.deepEqual(countTicks(1), [0, 1]);
+});
+
+test("instancesLabel 區分沒有資料與全部失敗", () => {
+  assert.equal(instancesLabel({ instances: 7, success_rate: 1 }), "7 台");
+  assert.equal(instancesLabel({ instances: 0, success_rate: null }), "0 台");
+  assert.equal(instancesLabel({ instances: null, success_rate: 0 }), "全部失敗，拿不到機器編號");
+  assert.equal(instancesLabel({ instances: null }), "—");
+  assert.equal(instancesLabel({}), "—");
 });
 
 test("formatPct 與 formatMs", () => {
@@ -215,4 +256,114 @@ test("failureText 只列出有發生的失敗種類", () => {
   assert.equal(failureText({ timeout: 0, busy: 0, error: 0 }), "無");
   assert.equal(failureText({ timeout: 173, busy: 0, error: 0 }), "逾時 173");
   assert.equal(failureText({ timeout: 173, busy: 5, error: 2 }), "逾時 173 · 忙碌 5 · 錯誤 2");
+});
+
+test("normalizeNickname 去控制字元與空白、截 12 字、空的變訪客", () => {
+  assert.equal(normalizeNickname("  小明 "), "小明");
+  assert.equal(normalizeNickname(""), "訪客");
+  assert.equal(normalizeNickname("a\u0000b​c"), "abc");
+  assert.equal(normalizeNickname("一二三四五六七八九十甲乙丙"), "一二三四五六七八九十甲乙");
+  assert.equal(normalizeNickname("😀😀😀😀😀😀😀😀😀😀😀😀😀"), "😀😀😀😀😀😀😀😀😀😀😀😀");
+});
+
+function memoryStorage(initial = {}) {
+  const data = { ...initial };
+  return { getItem: (k) => (k in data ? data[k] : null), setItem: (k, v) => { data[k] = String(v); }, data };
+}
+
+test("loadIdentity 第一次產生編號並記住，之後沿用", () => {
+  const storage = memoryStorage();
+  const first = loadIdentity(storage, () => "id-1");
+  assert.deepEqual(first, { clientId: "id-1", nickname: null });
+  assert.equal(storage.data.client_id, "id-1");
+  storage.setItem("nickname", "小明");
+  assert.deepEqual(loadIdentity(storage, () => "id-2"), { clientId: "id-1", nickname: "小明" });
+});
+
+test("localStorage 不能用時仍然可以運作", () => {
+  const broken = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
+  assert.deepEqual(loadIdentity(broken, () => "id-3"), { clientId: "id-3", nickname: null });
+  assert.deepEqual(loadIdentity(null, () => "id-4"), { clientId: "id-4", nickname: null });
+  assert.equal(saveNickname(broken, "  阿華 "), "阿華");
+  assert.equal(saveNickname(null, ""), "訪客");
+});
+
+test("withClient 與 reportBody 帶上 client", () => {
+  const client = { id: "c1", name: "小明" };
+  assert.deepEqual(withClient({ a: 1 }, client), { a: 1, client });
+  assert.deepEqual(withClient({ a: 1 }, null), { a: 1 });
+  const results = {
+    fixed: { outcome: "timeout", latencyMs: 10000, instanceId: null },
+    auto: { outcome: "ok", latencyMs: 412.4, instanceId: "i1" },
+  };
+  assert.equal(reportBody("o1", results, client).client, client);
+  assert.equal("client" in reportBody("o1", results), false);
+});
+
+const TARGETS_SNAP = {
+  fixed: {
+    machines: [{ id: "77e0", status: "active", phones: [{ name: "阿華", tag: "aaaaaaaa" }], phone_count: 1, loadtest_requests: 41 }],
+    requests: [{ tag: "cccccccc", name: "小明", machine: null, outcome: "timeout" }],
+  },
+  auto: {
+    machines: [{ id: "3f2a", status: "active", phones: [{ name: "阿華", tag: "aaaaaaaa" }, { name: "訪客", tag: "bbbbbbbb" }], phone_count: 2, loadtest_requests: 312 }],
+    requests: [],
+  },
+};
+
+test("graphPhones 合併兩邊、依暱稱排序、標出自己", () => {
+  assert.deepEqual(graphPhones(TARGETS_SNAP, "cccccccc"), [
+    { tag: "cccccccc", name: "小明", you: true },
+    { tag: "bbbbbbbb", name: "訪客", you: false },
+    { tag: "aaaaaaaa", name: "阿華", you: false },
+  ]);
+});
+
+test("graphPhones 超過上限時一定保留自己", () => {
+  const phones = Array.from({ length: 30 }, (_, i) => ({ name: `同學${String(i).padStart(2, "0")}`, tag: `t${i}` }));
+  const snap = { fixed: { machines: [{ id: "x", status: "active", phones, phone_count: 30, loadtest_requests: 0 }], requests: [] },
+                 auto: { machines: [], requests: [] } };
+  const list = graphPhones(snap, "t29", 20);
+  assert.equal(list.length, 20);
+  assert.equal(list.some((p) => p.tag === "t29" && p.you), true);
+});
+
+test("columnPositions 平均分配", () => {
+  assert.deepEqual(columnPositions(0, 0, 100), []);
+  assert.deepEqual(columnPositions(1, 0, 100), [50]);
+  assert.deepEqual(columnPositions(3, 0, 100), [0, 50, 100]);
+});
+
+test("edgeWidth 依筆數開根號，沒有筆數為 0", () => {
+  assert.equal(edgeWidth(0, 10), 0);
+  assert.equal(edgeWidth(null, 10), 0);
+  assert.equal(edgeWidth(10, 10), 6);
+  assert.equal(edgeWidth(1, 100), 1.5);
+});
+
+test("loadtestDotCount 約每 20 筆一顆、最多 5 顆", () => {
+  assert.equal(loadtestDotCount(0), 0);
+  assert.equal(loadtestDotCount(null), 0);
+  assert.equal(loadtestDotCount(5), 1);
+  assert.equal(loadtestDotCount(312), 2);
+  assert.equal(loadtestDotCount(5000), 5);
+});
+
+test("machineNodeState：新開機、閒置、沒有回應", () => {
+  assert.deepEqual(machineNodeState({ status: "active" }, false), { tone: "active", badge: null });
+  assert.deepEqual(machineNodeState({ status: "new" }, false), { tone: "new", badge: "新開機" });
+  assert.deepEqual(machineNodeState({ status: "idle" }, false), { tone: "idle", badge: "閒置" });
+  assert.deepEqual(machineNodeState({ status: "idle" }, true), { tone: "down", badge: "沒有回應" });
+});
+
+test("sideUnresponsive：有失敗卻沒有任何機器在接單", () => {
+  assert.equal(sideUnresponsive([{ status: "idle" }], { timeout: 5, busy: 0, error: 0 }), true);
+  assert.equal(sideUnresponsive([{ status: "idle" }], { timeout: 0, busy: 0, error: 0 }), false);
+  assert.equal(sideUnresponsive([{ status: "active" }], { timeout: 5, busy: 0, error: 0 }), false);
+  assert.equal(sideUnresponsive([], { timeout: 1, busy: 0, error: 0 }), true);
+});
+
+test("unservedText 只在有失敗時顯示", () => {
+  assert.equal(unservedText("固定版", { timeout: 520, busy: 0, error: 2 }), "固定版沒接到的請求：逾時 520 · 錯誤 2");
+  assert.equal(unservedText("擴展版", { timeout: 0, busy: 0, error: 0 }), "");
 });

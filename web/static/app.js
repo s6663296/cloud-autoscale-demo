@@ -5,7 +5,8 @@
 import { initDashboard } from "./dashboard.js";
 import {
   buildOrderBody, cartLines, cartSummary, etaText, makeOrderId,
-  outcomeFromStatus, progressFromTrack, reportBody, TARGETS, trackReportBody,
+  GUEST_NAME, loadIdentity, outcomeFromStatus, progressFromTrack, reportBody, saveNickname, TARGETS, trackReportBody,
+  withClient,
 } from "./logic.js";
 import { CityMapView } from "./map.js";
 
@@ -34,7 +35,47 @@ const $ = (sel) => document.querySelector(sel);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const look = (r) => LOOKS[r.id] || DEFAULT_LOOK;
 
+// localStorage 在某些瀏覽器設定下光是讀取屬性就會丟例外
+const storage = (() => {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+})();
+
+const currentClient = () => ({ id: state.identity.clientId, name: state.identity.nickname ?? GUEST_NAME });
+
+function renderNickname() {
+  const chip = $("#nickname-chip");
+  chip.querySelector("span").textContent = state.identity.nickname ?? GUEST_NAME;
+  chip.hidden = false;
+}
+
+function askNickname() {
+  const dialog = $("#nickname-dialog");
+  $("#nickname-input").value = state.identity.nickname && state.identity.nickname !== GUEST_NAME ? state.identity.nickname : "";
+  dialog.returnValue = ""; // 按 Esc 關閉時 returnValue 不會更新，先清掉上一次的結果
+  dialog.showModal();
+}
+
+function setupNickname() {
+  state.identity = loadIdentity(storage);
+  const dialog = $("#nickname-dialog");
+  dialog.addEventListener("close", () => {
+    const typed = dialog.returnValue === "save" ? $("#nickname-input").value : "";
+    // 按 Esc 關閉、而且原本已有暱稱時保留原本的
+    if (dialog.returnValue === "" && state.identity.nickname) return;
+    state.identity.nickname = saveNickname(storage, typed);
+    renderNickname();
+  });
+  $("#nickname-chip").addEventListener("click", askNickname);
+  if (state.identity.nickname) renderNickname();
+  else askNickname();
+}
+
 const state = {
+  identity: null,
   config: null,
   map: null,
   restaurant: null,
@@ -387,7 +428,7 @@ function reportTrack(target, r) {
   fetch("/api/reports/track", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(trackReportBody(target, r)),
+    body: JSON.stringify(withClient(trackReportBody(target, r), currentClient())),
   }).catch((err) => console.warn("回報 web 失敗", err));
 }
 
@@ -493,7 +534,7 @@ async function placeOrder() {
     await fetch("/api/reports/order", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(reportBody(orderId, results)),
+      body: JSON.stringify(reportBody(orderId, results, currentClient())),
     });
   } catch (err) {
     console.warn("回報 web 失敗", err);
@@ -520,7 +561,9 @@ function orderAgain() {
 // --- 啟動 ------------------------------------------------------------------
 
 async function init() {
-  initDashboard({ toggle: $("#debug-toggle"), panel: $("#dashboard") });
+  const dashboard = initDashboard({ toggle: $("#debug-toggle"), panel: $("#dashboard") });
+  setupNickname();
+  dashboard.setClientId(state.identity.clientId);
   history.replaceState({ screen: "home" }, "");
   $("#back").addEventListener("click", () => history.back());
   $("#view-cart").addEventListener("click", () => {
@@ -532,6 +575,7 @@ async function init() {
   $("#order-fab").addEventListener("click", () => show("tracking"));
   try {
     [state.config, state.map] = await Promise.all([getJSON("/api/config"), getJSON("/api/map")]);
+    dashboard.setAutoMax(state.config.auto_max_instances);
   } catch (err) {
     const msg = $("#load-error");
     msg.textContent = `載入失敗：${err.message}。請重新整理頁面。`;
