@@ -91,11 +91,25 @@ def test_config_from_env(monkeypatch):
     monkeypatch.setattr(config, "AUTO_URL", "https://auto.example")
     monkeypatch.setattr(config, "TIMEOUT_MS", 50)
     monkeypatch.setattr(config, "TRACK_INTERVAL_MS", 1500)
+    monkeypatch.setattr(config, "AUTO_MAX_INSTANCES", 12)
     with TestClient(create_app()) as c:
         assert c.get("/api/config").json() == {
             "fixed_url": "https://fixed.example", "auto_url": "https://auto.example", "timeout_ms": 50,
-            "track_interval_ms": 1500,
+            "track_interval_ms": 1500, "auto_max_instances": 12,
         }
+
+
+def test_auto_max_instances_defaults_to_10(monkeypatch):
+    import importlib
+
+    monkeypatch.delenv("AUTO_MAX_INSTANCES", raising=False)
+    try:
+        assert importlib.reload(config).AUTO_MAX_INSTANCES == 10
+        monkeypatch.setenv("AUTO_MAX_INSTANCES", "8")
+        assert importlib.reload(config).AUTO_MAX_INSTANCES == 8
+    finally:
+        monkeypatch.delenv("AUTO_MAX_INSTANCES", raising=False)
+        importlib.reload(config)
 
 
 def test_map(client):
