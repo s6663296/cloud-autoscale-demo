@@ -80,10 +80,41 @@ def test_loadtest_report_with_single_target(client):
         ("/api/reports/loadtest", {"targets": {"other": {"ok": 1}}}),
         ("/api/reports/loadtest", {"targets": {"auto": {"ok": -1}}}),
         ("/api/reports/loadtest", {"targets": {"auto": {"latency_count": -1}}}),
+        ("/api/reports/order", {"order_id": "x", "results": [], "client": {"id": "", "name": "a"}}),
+        ("/api/reports/track", {"target": "auto", "outcome": "ok", "latency_ms": 1, "client": {"id": "x" * 65, "name": "a"}}),
+        ("/api/reports/loadtest", {"targets": {"auto": {"instance_counts": {"a": -1}}}}),
     ],
 )
 def test_reports_reject_malformed(client, path, body):
     assert client.post(path, json=body).status_code == 422
+
+
+def test_reports_with_client_show_up_in_machines(client, app):
+    body = {**ORDER_REPORT, "client": {"id": "2b9c7e1a-5d0e-4c1f", "name": "  小明 "}}
+    assert client.post("/api/reports/order", json=body).status_code == 200
+    track = {"target": "auto", "outcome": "ok", "latency_ms": 18, "instance_id": "00bf4bf0...",
+             "client": {"id": "ffff0000-1111", "name": ""}}
+    assert client.post("/api/reports/track", json=track).status_code == 200
+    [m] = _snapshot(app)["targets"]["auto"]["machines"]
+    assert m["phones"] == [{"name": "小明", "tag": "2b9c7e1a"}, {"name": "訪客", "tag": "ffff0000"}]
+
+
+def test_reports_without_client_still_counted(client, app):
+    track = {"target": "auto", "outcome": "ok", "latency_ms": 18, "instance_id": "00bf4bf0..."}
+    assert client.post("/api/reports/track", json=track).status_code == 200
+    assert client.post("/api/reports/order", json=ORDER_REPORT).status_code == 200
+    snap = _snapshot(app)
+    assert snap["targets"]["auto"]["instances"] == 1
+    assert snap["targets"]["auto"]["machines"][0]["phone_count"] == 0
+
+
+def test_loadtest_instance_counts_reach_machines(client, app):
+    body = {"targets": {"auto": {"ok": 5, "latency_sum_ms": 50, "latency_count": 5,
+                                 "instance_ids": ["00bf...", "00c2..."],
+                                 "instance_counts": {"00bf...": 3, "00c2...": 2}}}}
+    assert client.post("/api/reports/loadtest", json=body).status_code == 200
+    ms = _snapshot(app)["targets"]["auto"]["machines"]
+    assert sorted(m["loadtest_requests"] for m in ms) == [2, 3]
 
 
 def test_config_from_env(monkeypatch):

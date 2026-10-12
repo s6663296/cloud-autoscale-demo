@@ -9,7 +9,7 @@ import math
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, Response
 from fastapi.responses import FileResponse, StreamingResponse
@@ -36,6 +36,13 @@ Target = Literal["fixed", "auto"]
 Outcome = Literal["ok", "timeout", "busy", "error"]
 
 
+class Client(BaseModel):
+    """手機自己輸入的暱稱與隨機編號；只送 web，不送 dispatch。"""
+
+    id: str = Field(min_length=1, max_length=64)
+    name: str = Field("", max_length=200)
+
+
 class OrderResult(BaseModel):
     target: Target
     outcome: Outcome
@@ -43,9 +50,14 @@ class OrderResult(BaseModel):
     instance_id: str | None = None
 
 
+class TrackReport(OrderResult):
+    client: Client | None = None
+
+
 class OrderReport(BaseModel):
     order_id: str
     results: list[OrderResult]
+    client: Client | None = None
 
 
 class TargetSummary(BaseModel):
@@ -56,6 +68,7 @@ class TargetSummary(BaseModel):
     latency_sum_ms: float = Field(0, ge=0)  # ok 與 timeout 的延遲總和
     latency_count: int = Field(0, ge=0)
     instance_ids: list[str] = []
+    instance_counts: dict[str, Annotated[int, Field(ge=0)]] = {}  # 每台機器的成功筆數（選填）
 
 
 class LoadtestReport(BaseModel):
@@ -140,12 +153,15 @@ def create_app() -> FastAPI:
 
     @app.post("/api/reports/order")
     async def report_order(report: OrderReport) -> dict:
-        metrics.record_order([r.model_dump() for r in report.results])
+        client = report.client.model_dump() if report.client else None
+        metrics.record_order([r.model_dump() for r in report.results], client=client)
         return {"ok": True}
 
     @app.post("/api/reports/track")
-    async def report_track(result: OrderResult) -> dict:
-        metrics.record_track(result.model_dump())
+    async def report_track(report: TrackReport) -> dict:
+        result = report.model_dump(exclude={"client"})
+        client = report.client.model_dump() if report.client else None
+        metrics.record_track(result, client=client)
         return {"ok": True}
 
     @app.post("/api/reports/loadtest")
