@@ -371,7 +371,15 @@ python -m loadtest probe --report-to <WEB_URL>
 ./deploy.sh deploy   # 建置映像檔並部署三個服務
 ./deploy.sh warm     # min-instances 設為 1（展示前）
 ./deploy.sh cool     # min-instances 設為 0（平時）
+./deploy.sh budget   # 建立 1 美元預算警示（需設定 BILLING_ACCOUNT）
+./deploy.sh urls     # 列出三個服務的網址
 ```
+
+部署細節：
+
+- **執行身分**：三個服務以專用的服務帳號 `delivery-runtime` 執行，不授予任何角色（服務只提供 HTTP，並讀取 metadata server，兩者都不需要 IAM 權限）。2024 年起新專案的 Cloud Build 改以預設 compute 服務帳號建置，`deploy` 會替它加上建置所需的角色；這些角色只用於建置，服務不以該帳號執行。
+- **環境變數以 `deploy.sh` 為準**：`deploy` 以 `--set-env-vars` 寫入每個服務的完整環境變數，在主控台手動修改的值會在下次部署時被覆蓋。校準參數寫在 `deploy.sh` 開頭的 `SHARED_ENV`（三個服務共用，例如 `CITY_GRID_SIZE`）、`DISPATCH_ENV`、`WEB_ENV`。
+- **網址互相依賴**：第一次部署時服務網址尚未存在，部署完成後再以 `--update-env-vars` 補上 `ALLOWED_ORIGIN`、`FIXED_URL`、`AUTO_URL`。之後重新部署時，網址與新映像檔寫進同一個 revision，不會出現網址為空的空窗期。
 
 主要環境變數：
 
