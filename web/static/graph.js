@@ -7,8 +7,8 @@ import {
 
 const NS = "http://www.w3.org/2000/svg";
 const ROW = 24; // 每個節點佔的高度
-const TOP = 26;
-const BOTTOM = 14;
+const TOP = 40; // 欄標題在 y=12，第一個節點的名字畫在節點上方 8px，要留空間
+const BOTTOM = 28; // 「模擬顧客」字樣畫在方塊下方 19px，要留在圖內
 const FLIGHT_MS = 900;
 const MAX_DOTS = 300;
 const SIDE_X = { fixed: 0.1, auto: 0.9 };
