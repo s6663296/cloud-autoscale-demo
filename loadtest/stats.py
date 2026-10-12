@@ -2,7 +2,7 @@
 
 延遲與 web 儀表板的「平均回應時間」同一個定義（README 第 6 節）：下單與追蹤的每一筆 ok、timeout 都計入，
 只送總和與筆數，web 端算出的平均是精確值。
-每台機器的成功筆數（instance_counts）供 web 的機器格子使用；instance_ids 繼續送以相容舊版 web。
+每台機器的成功筆數（instance_counts）供 web 的請求流向圖使用；instance_ids 繼續送以相容舊版 web。
 """
 
 OUTCOMES = ("ok", "timeout", "busy", "error")

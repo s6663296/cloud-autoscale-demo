@@ -157,6 +157,8 @@ def test_index_and_static(client):
     assert 'data-metric="instances"' in res.text
     assert 'id="nickname-dialog"' in res.text
     assert 'id="nickname-chip"' in res.text
+    assert 'id="dash-graph"' in res.text
+    assert client.get("/static/graph.js").status_code == 200
 
 
 # --- SSE（以真實的 uvicorn 驗證串流）----------------------------------------

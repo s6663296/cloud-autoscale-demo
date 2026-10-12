@@ -2,8 +2,9 @@
 
 import {
   chartPath, countAxisMax, countTicks, failureText, formatLatency, formatPct, instancesLabel, latencyText,
-  stepPath, TARGETS,
+  stepPath, TARGETS, unservedText,
 } from "./logic.js";
+import { createRequestGraph } from "./graph.js";
 
 const NS = "http://www.w3.org/2000/svg";
 const NAME = { fixed: "固定版", auto: "擴展版" };
@@ -62,10 +63,13 @@ const METRICS = {
 
 export function initDashboard({ toggle, panel }) {
   const status = panel.querySelector("#dash-status");
-  const options = { autoMax: DEFAULT_AUTO_MAX };
+  const options = { autoMax: DEFAULT_AUTO_MAX, myTag: null };
+  const graph = createRequestGraph(panel.querySelector(".graph-svg"));
   const charts = [...panel.querySelectorAll(".chart")].map((figure) => setupChart(figure, options));
-  // 手機版預設收起趨勢圖，讓儀表板與兩個追蹤區塊擠得進同一個畫面
-  panel.querySelector("#dash-charts").open = matchMedia("(min-width: 768px)").matches;
+  // 手機版預設收起趨勢圖與請求流向圖，讓儀表板與兩個追蹤區塊擠得進同一個畫面
+  const wide = matchMedia("(min-width: 768px)").matches;
+  panel.querySelector("#dash-charts").open = wide;
+  panel.querySelector("#dash-graph").open = wide;
   let source = null;
   let latest = null;
 
@@ -97,12 +101,20 @@ export function initDashboard({ toggle, panel }) {
       renderStats(panel.querySelector(`.dash-target[data-target="${target}"] .stats`), snap.targets[target]);
     }
     for (const chart of charts) chart.update(snap.series);
+    graph.update(snap, options.myTag);
+    const unserved = panel.querySelector(".graph-unserved");
+    unserved.textContent = TARGETS.map((t) => unservedText(NAME[t], snap.targets[t].failures)).filter(Boolean).join("\n");
+    unserved.hidden = !unserved.textContent;
   }
 
   return {
     setAutoMax(n) {
       options.autoMax = Number.isFinite(n) && n > 0 ? n : DEFAULT_AUTO_MAX;
       for (const chart of charts) chart.redraw();
+    },
+    setClientId(id) {
+      options.myTag = id ? id.slice(0, 8) : null;
+      if (latest) render(latest);
     },
   };
 }

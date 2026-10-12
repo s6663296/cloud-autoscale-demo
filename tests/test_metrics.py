@@ -231,7 +231,7 @@ def test_snapshot_shape(metrics, clock):
     assert snap["now"] == T0
     assert set(snap) == {"now", "targets", "series"}
     assert set(snap["targets"]) == {"fixed", "auto"}
-    assert set(snap["targets"]["fixed"]) == {"instances", "rps", "success_rate", "avg_ms", "failures", "machines"}
+    assert set(snap["targets"]["fixed"]) == {"instances", "rps", "success_rate", "avg_ms", "failures", "machines", "requests"}
 
 
 def test_snapshot_defaults_to_clock(metrics, clock):
@@ -329,3 +329,29 @@ def test_first_seen_forgotten_after_600s(metrics, clock):
     metrics.snapshot(clock.t)  # 觸發清理
     metrics.record_track(_track(instance_id="inst-a001"))
     assert _machines(metrics, clock.t + 1)[0]["status"] == "new"
+
+
+# --- 請求流向 -------------------------------------------------------------------
+
+
+def test_requests_list_phone_requests_of_last_second(metrics, clock):
+    metrics.record_track(_track(instance_id="inst-a001"), client=_client("aaaa1111-x", "小明"))
+    metrics.record_order(_student(fixed_outcome="timeout", fixed_id=None, auto_id="inst-a002"), client=_client("bbbb2222-x", " 阿華 "))
+    snap = metrics.snapshot(T0 + 1)
+    assert snap["targets"]["auto"]["requests"] == [
+        {"tag": "aaaa1111", "name": "小明", "machine": "a001", "outcome": "ok"},
+        {"tag": "bbbb2222", "name": "阿華", "machine": "a002", "outcome": "ok"},
+    ]
+    assert snap["targets"]["fixed"]["requests"] == [{"tag": "bbbb2222", "name": "阿華", "machine": None, "outcome": "timeout"}]
+    assert metrics.snapshot(T0 + 2)["targets"]["auto"]["requests"] == []  # 只推送最近 1 秒
+
+
+def test_requests_without_client_not_listed(metrics, clock):
+    metrics.record_track(_track(instance_id="inst-a001"))
+    assert metrics.snapshot(T0 + 1)["targets"]["auto"]["requests"] == []
+
+
+def test_requests_capped_at_200_per_side(metrics, clock):
+    for i in range(250):
+        metrics.record_track(_track(instance_id="inst-a001"), client=_client(f"c{i:04d}-xxxx", "同學"))
+    assert len(metrics.snapshot(T0 + 1)["targets"]["auto"]["requests"]) == 200

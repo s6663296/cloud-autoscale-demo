@@ -284,6 +284,61 @@ export function latencyText(t) {
   return t.rps > 0 ? ["全部失敗", true] : ["—", false];
 }
 
+// --- 請求流向圖 -------------------------------------------------------------
+
+/** 中間一欄的同學：兩邊 machines[].phones 與 requests 的聯集，依暱稱排序；超過上限時一定保留自己。 */
+export function graphPhones(targets, myTag, max = 20) {
+  const byTag = new Map();
+  for (const target of TARGETS) {
+    for (const m of targets[target]?.machines ?? []) for (const p of m.phones ?? []) byTag.set(p.tag, p.name);
+    for (const r of targets[target]?.requests ?? []) byTag.set(r.tag, r.name);
+  }
+  const order = (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.tag < b.tag ? -1 : 1);
+  let list = [...byTag].map(([tag, name]) => ({ tag, name, you: myTag !== null && tag === myTag })).sort(order);
+  if (list.length > max) {
+    const mine = list.filter((p) => p.you);
+    list = [...mine, ...list.filter((p) => !p.you).slice(0, max - mine.length)].sort(order);
+  }
+  return list;
+}
+
+/** n 個節點在 top～bottom 之間平均分配；只有一個時放中間。 */
+export function columnPositions(n, top, bottom) {
+  if (n <= 0) return [];
+  if (n === 1) return [(top + bottom) / 2];
+  return Array.from({ length: n }, (_, i) => top + (i * (bottom - top)) / (n - 1));
+}
+
+/** 模擬顧客的線寬：依筆數開根號，最粗 6；沒有筆數不畫。 */
+export function edgeWidth(n, max) {
+  if (!n || n <= 0) return 0;
+  return round1(1 + 5 * Math.sqrt(n / Math.max(max, 1)));
+}
+
+/** 模擬顧客每台機器每秒飛幾顆小點：約每 20 筆一顆，最多 5 顆。 */
+export function loadtestDotCount(requests) {
+  if (!requests || requests <= 0) return 0;
+  return Math.min(5, Math.ceil(requests / 10 / 20));
+}
+
+const MACHINE_BADGE = { new: "新開機", idle: "閒置" };
+
+/** 機器節點的樣式與標籤。unresponsive：這一邊有失敗卻沒有機器在接單，閒置的機器改標「沒有回應」。 */
+export function machineNodeState(m, unresponsive) {
+  if (unresponsive && m.status === "idle") return { tone: "down", badge: "沒有回應" };
+  return { tone: m.status, badge: MACHINE_BADGE[m.status] ?? null };
+}
+
+const hasFailures = (failures) => Object.values(failures ?? {}).some((n) => n > 0);
+
+export function sideUnresponsive(machines, failures) {
+  return hasFailures(failures) && !machines.some((m) => m.status === "new" || m.status === "active");
+}
+
+export function unservedText(name, failures) {
+  return hasFailures(failures) ? `${name}沒接到的請求：${failureText(failures)}` : "";
+}
+
 // --- 購物車 ----------------------------------------------------------------
 
 export function cartLines(menu, qty) {

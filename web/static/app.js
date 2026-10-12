@@ -563,6 +563,7 @@ function orderAgain() {
 async function init() {
   const dashboard = initDashboard({ toggle: $("#debug-toggle"), panel: $("#dashboard") });
   setupNickname();
+  dashboard.setClientId(state.identity.clientId);
   history.replaceState({ screen: "home" }, "");
   $("#back").addEventListener("click", () => history.back());
   $("#view-cart").addEventListener("click", () => {

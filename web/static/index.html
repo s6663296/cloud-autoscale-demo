@@ -126,6 +126,12 @@
           <dl class="stats"></dl>
         </article>
       </div>
+      <details id="dash-graph" class="dash-graph">
+        <summary>請求流向（最近 10 秒）</summary>
+        <svg class="graph-svg" role="img" aria-label="請求流向：同學在中間，左邊是固定版的機器，右邊是擴展版的機器"></svg>
+        <p class="graph-legend muted">每一筆手機請求是一顆小點，從手機飛到處理它的機器；紅點是沒接到的請求。線越粗，代表模擬顧客的請求越多。</p>
+        <p class="graph-unserved" hidden></p>
+      </details>
       <details id="dash-charts" class="dash-charts">
         <summary>趨勢圖（最近 10 分鐘）</summary>
         <div class="charts">
