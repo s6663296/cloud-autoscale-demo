@@ -255,20 +255,8 @@ class Metrics:
         point = {"t": start}
         for target in TARGETS:
             s = self._summary(slots, target)
-            point[target] = {
-                "success_rate": s["success_rate"],
-                "avg_ms": s["avg_ms"],
-                "instances": self._instance_count(slots, target, s["completed"]),
-            }
+            point[target] = {"success_rate": s["success_rate"], "avg_ms": s["avg_ms"]}
         return point
-
-    @staticmethod
-    def _instance_count(slots: list[_Slot], target: str, completed: int) -> int | None:
-        """不同 instance_id 數；有請求卻一個編號都沒有（全部失敗）時為 None，避免看起來像機器不見了。"""
-        ids = set().union(*(slot.instances[target] for slot in slots)) if slots else set()
-        if ids:
-            return len(ids)
-        return None if completed else 0
 
 
 def _short_ids(ids: list[str]) -> dict[str, str]:

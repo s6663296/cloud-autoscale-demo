@@ -575,7 +575,6 @@ async function init() {
   $("#order-fab").addEventListener("click", () => show("tracking"));
   try {
     [state.config, state.map] = await Promise.all([getJSON("/api/config"), getJSON("/api/map")]);
-    dashboard.setAutoMax(state.config.auto_max_instances);
   } catch (err) {
     const msg = $("#load-error");
     msg.textContent = `載入失敗：${err.message}。請重新整理頁面。`;

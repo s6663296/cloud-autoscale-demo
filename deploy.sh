@@ -24,6 +24,7 @@ RUNTIME_SA="${RUNTIME_SA_NAME}@${PROJECT}.iam.gserviceaccount.com"
 SHARED_ENV=""      # all three services; the city must match, e.g. CITY_GRID_SIZE=60
 DISPATCH_ENV=""    # both dispatch services, e.g. CANDIDATES=5,ALT_ROUTES=3
 WEB_ENV=""         # web only, e.g. TIMEOUT_MS=10000,TRACK_INTERVAL_MS=2000
+AUTO_MAX_INSTANCES=20  # dispatch-auto max-instances (the project's Cloud Run instance quota)
 
 if [ -z "$PROJECT" ]; then
     echo "No GCP project. Run: gcloud config set project <PROJECT_ID>  (or export PROJECT_ID=...)" >&2
@@ -119,7 +120,7 @@ cmd_deploy() {
 
     echo "== Deploying services (same image) =="
     deploy_service dispatch-fixed "$dispatch_env" 1 4 30 --cpu-boost
-    deploy_service dispatch-auto  "$dispatch_env" 8 4 30 --cpu-boost
+    deploy_service dispatch-auto  "$dispatch_env" "$AUTO_MAX_INSTANCES" 4 30 --cpu-boost
     # 300 s: SSE reconnects every 5 minutes; a longer timeout keeps a replaced web instance
     # alive while the only allowed instance is busy draining, and every request gets 429
     deploy_service web            "$web_env"      1 250 300
