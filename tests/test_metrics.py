@@ -167,8 +167,8 @@ def test_series_has_60_points_with_nulls(metrics, clock):
     assert [p["t"] for p in series] == list(range(series[0]["t"], series[0]["t"] + 600, 10))
     assert series[-1]["t"] <= clock.t < series[-1]["t"] + 10
     for p in series:
-        assert p["fixed"] == {"success_rate": None, "avg_ms": None, "instances": 0}
-        assert p["auto"] == {"success_rate": None, "avg_ms": None, "instances": 0}
+        assert p["fixed"] == {"success_rate": None, "avg_ms": None}
+        assert p["auto"] == {"success_rate": None, "avg_ms": None}
 
 
 def test_series_aggregates_10s_buckets(metrics, clock):
@@ -181,7 +181,7 @@ def test_series_aggregates_10s_buckets(metrics, clock):
     point = next(p for p in series if p["t"] == start)
     assert point["fixed"]["success_rate"] == 0.75
     assert point["fixed"]["avg_ms"] == pytest.approx(10600 / 4)
-    assert point["auto"] == {"success_rate": None, "avg_ms": None, "instances": 0}
+    assert point["auto"] == {"success_rate": None, "avg_ms": None}
     later = next(p for p in series if p["t"] == start + 10)
     assert later["fixed"]["success_rate"] is None
 
@@ -197,27 +197,6 @@ def test_series_current_bucket_keeps_updating(metrics, clock):
     metrics.record_loadtest(_lt(fixed={"error": 1}))
     last = metrics.snapshot(clock.t)["series"][-1]
     assert last["fixed"]["success_rate"] == pytest.approx(10 / 11)
-
-
-def test_series_counts_instances_per_bucket(metrics, clock):
-    clock.t = T0 - T0 % 10 - 100
-    start = int(clock.t)
-    metrics.record_order(_student(fixed_id="f1", auto_id="a1"))
-    clock.t = start + 3
-    metrics.record_loadtest(_lt(auto={"ok": 2, "instance_ids": ["a1", "a2"]}))
-    metrics.record_track(_track("auto", instance_id="a3"))
-    point = next(p for p in metrics.snapshot(start + 100)["series"] if p["t"] == start)
-    assert point["fixed"]["instances"] == 1
-    assert point["auto"]["instances"] == 3  # 觀眾與壓測合併、去重
-
-
-def test_series_instances_zero_when_idle_and_null_when_all_failed(metrics, clock):
-    clock.t = T0 - T0 % 10 - 100
-    start = int(clock.t)
-    metrics.record_loadtest(_lt(fixed={"timeout": 5, "latency_sum_ms": 50000, "latency_count": 5}))
-    point = next(p for p in metrics.snapshot(start + 100)["series"] if p["t"] == start)
-    assert point["fixed"]["instances"] is None  # 有請求但拿不到機器編號
-    assert point["auto"]["instances"] == 0  # 沒有請求
 
 
 def test_series_drops_data_older_than_600s(metrics, clock):

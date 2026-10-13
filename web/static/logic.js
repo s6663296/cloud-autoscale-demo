@@ -223,38 +223,6 @@ export function chartPath(values, x, y) {
   return d;
 }
 
-/** 階梯線 path：台數一格一格變化，先水平延續上一個值再垂直跳到新值；值為 null 時斷開。 */
-export function stepPath(values, x, y) {
-  let d = "";
-  let penDown = false;
-  values.forEach((v, i) => {
-    if (v === null || v === undefined) {
-      penDown = false;
-      return;
-    }
-    d += penDown ? `H${round1(x(i))}V${round1(y(v))}` : `M${round1(x(i))} ${round1(y(v))}`;
-    penDown = true;
-  });
-  return d;
-}
-
-/** 機器數圖的 Y 軸最大值：上限與資料最大值取大，至少為 1。 */
-export function countAxisMax(values, cap) {
-  return Math.max(1, cap || 0, ...values);
-}
-
-/** 機器數圖的刻度：0、一半（無條件進位）、最大值，只標整數、不重複。 */
-export function countTicks(max) {
-  return [...new Set([0, Math.ceil(max / 2), max])];
-}
-
-/** 機器數的文字：有請求卻拿不到機器編號時明講，不要顯示成沒有資料。 */
-export function instancesLabel(cell) {
-  const n = cell.instances;
-  if (n === null || n === undefined) return cell.success_rate === 0 ? "全部失敗，拿不到機器編號" : "—";
-  return `${n} 台`;
-}
-
 export function formatPct(rate) {
   return rate === null || rate === undefined ? "—" : `${Math.round(rate * 100)}%`;
 }

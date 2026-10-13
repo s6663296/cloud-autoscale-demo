@@ -130,7 +130,6 @@ def create_app() -> FastAPI:
         "auto_url": config.AUTO_URL,
         "timeout_ms": config.TIMEOUT_MS,
         "track_interval_ms": config.TRACK_INTERVAL_MS,
-        "auto_max_instances": config.AUTO_MAX_INSTANCES,
     }
 
     @asynccontextmanager

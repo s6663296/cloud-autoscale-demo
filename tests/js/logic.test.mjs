@@ -11,14 +11,10 @@ import {
   machineNodeState,
   sideUnresponsive,
   unservedText,
-  countAxisMax,
-  countTicks,
-  instancesLabel,
   loadIdentity,
   normalizeNickname,
   saveNickname,
   withClient,
-  stepPath,
   fitView,
   failureText,
   formatLatency,
@@ -105,32 +101,6 @@ test("chartPath 遇到 null 斷開線段", () => {
   const values = [1, null, 0.5, 0.6];
   const d = chartPath(values, (i) => i * 10, (v) => 100 - v * 100);
   assert.equal(d, "M0 0M20 50L30 40");
-});
-
-test("stepPath 畫階梯線、遇到 null 斷開", () => {
-  const d = stepPath([1, 1, 3, null, 2], (i) => i * 10, (v) => v);
-  assert.equal(d, "M0 1H10V1H20V3M40 2");
-  assert.equal(stepPath([null, null], (i) => i, (v) => v), "");
-});
-
-test("countAxisMax 取上限與資料最大值，至少為 1", () => {
-  assert.equal(countAxisMax([1, 7], 10), 10);
-  assert.equal(countAxisMax([12], 10), 12);
-  assert.equal(countAxisMax([], 0), 1);
-});
-
-test("countTicks 只標整數且不重複", () => {
-  assert.deepEqual(countTicks(10), [0, 5, 10]);
-  assert.deepEqual(countTicks(7), [0, 4, 7]);
-  assert.deepEqual(countTicks(1), [0, 1]);
-});
-
-test("instancesLabel 區分沒有資料與全部失敗", () => {
-  assert.equal(instancesLabel({ instances: 7, success_rate: 1 }), "7 台");
-  assert.equal(instancesLabel({ instances: 0, success_rate: null }), "0 台");
-  assert.equal(instancesLabel({ instances: null, success_rate: 0 }), "全部失敗，拿不到機器編號");
-  assert.equal(instancesLabel({ instances: null }), "—");
-  assert.equal(instancesLabel({}), "—");
 });
 
 test("formatPct 與 formatMs", () => {

@@ -135,22 +135,16 @@
       <details id="dash-charts" class="dash-charts">
         <summary>趨勢圖（最近 10 分鐘）</summary>
         <div class="charts">
-          <figure class="chart chart-wide" data-metric="instances">
-            <figcaption title="每 10 秒內有處理請求的機器數；只有成功的回應帶得回機器編號">機器數</figcaption>
-            <div class="legend"></div>
-            <svg class="chart-svg" role="img" aria-label="機器數趨勢"></svg>
-            <div class="tooltip" hidden></div>
-          </figure>
           <figure class="chart" data-metric="success_rate">
-            <figcaption>成功率</figcaption>
+            <figcaption title="每 10 秒，成功的請求佔完成請求的比例">要求數（成功率）</figcaption>
             <div class="legend"></div>
-            <svg class="chart-svg" role="img" aria-label="成功率趨勢"></svg>
+            <svg class="chart-svg" role="img" aria-label="要求數（成功率）趨勢"></svg>
             <div class="tooltip" hidden></div>
           </figure>
           <figure class="chart" data-metric="avg_ms">
-            <figcaption title="每 10 秒，下單與外送員位置更新的每一筆請求，從送出到收到回應的平均時間；逾時以 10 秒計，忙碌與錯誤不計入">平均回應時間</figcaption>
+            <figcaption title="每 10 秒，下單與外送員位置更新的每一筆請求，從送出到收到回應的平均時間；逾時以 10 秒計，忙碌與錯誤不計入">要求的延遲時間（平均）</figcaption>
             <div class="legend"></div>
-            <svg class="chart-svg" role="img" aria-label="平均回應時間趨勢"></svg>
+            <svg class="chart-svg" role="img" aria-label="要求的延遲時間（平均）趨勢"></svg>
             <div class="tooltip" hidden></div>
           </figure>
         </div>

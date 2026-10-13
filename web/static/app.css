@@ -471,7 +471,10 @@ body:has(.screen:not([hidden]) > .bottom-bar:not([hidden])) .order-fab { bottom:
 .dash-target { min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: #fafafa; }
 .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 8px; margin: 4px 0 0; }
 .stats div { min-width: 0; }
-.stats dt { font-size: 11px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 名稱與 Cloud Run 原生指標一致、比較長，窄欄時換行，數值對齊在底部 */
+.stats div { display: flex; flex-direction: column; justify-content: flex-end; }
+.stats dt { font-size: 11px; line-height: 1.25; color: var(--text-2); }
+.stats dt .aspect { display: inline-block; white-space: nowrap; }
 .stats dd { margin: 0; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .stats dd.small { font-size: 13px; font-weight: 600; }
 /* 失敗次數會列出多種失敗，佔兩欄並允許換行 */
@@ -543,10 +546,6 @@ body:has(.screen:not([hidden]) > .bottom-bar:not([hidden])) .order-fab { bottom:
 .auto-stroke { stroke: var(--auto); }
 .fixed-fill { fill: var(--fixed); }
 .auto-fill { fill: var(--auto); }
-/* 機器數圖佔滿整列，放在成功率與回應時間上方；虛線是擴展版上限 */
-.chart-wide { grid-column: 1 / -1; }
-.chart-svg .cap-line { stroke-width: 1.5; stroke-dasharray: 5 4; }
-.chart-svg .cap-label { fill: var(--auto); font-weight: 600; }
 
 /* 窄螢幕：兩個追蹤區塊並排，縮小字級與留白 */
 @media (max-width: 599px) {

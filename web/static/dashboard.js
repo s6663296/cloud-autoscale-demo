@@ -1,17 +1,14 @@
 // Debug 儀表板：展開時建立 EventSource，收起時關閉。
 
-import {
-  chartPath, countAxisMax, countTicks, failureText, formatLatency, formatPct, instancesLabel, latencyText,
-  stepPath, TARGETS, unservedText,
-} from "./logic.js";
+import { chartPath, failureText, formatLatency, formatPct, latencyText, TARGETS, unservedText } from "./logic.js";
 import { createRequestGraph } from "./graph.js";
 
 const NS = "http://www.w3.org/2000/svg";
 const NAME = { fixed: "固定版", auto: "擴展版" };
 const RPS_HINT = "最近 10 秒平均每秒完成的請求數，含下單與外送員位置更新。兩邊收到的新訂單一樣多，但下單失敗的顧客不會有後續的位置更新，所以撐不住的一方請求數會少很多";
+const INSTANCES_HINT = "最近 10 秒內有處理請求的執行個體數；閒置中的不計入，只有成功的回應帶得回執行個體編號";
 const FAILURE_HINT = "最近 10 秒內失敗的請求數。逾時：超過 10 秒沒有回應；忙碌：服務回覆 429 拒絕；錯誤：其他錯誤或無法連線";
 const LATENCY_HINT = "最近 10 秒內，下單與外送員位置更新的每一筆請求，從送出到收到回應的平均時間；逾時以 10 秒計，忙碌與錯誤不計入";
-const DEFAULT_AUTO_MAX = 10; // /api/config 還沒載入前先用雲端的上限
 // 圖表高度固定、寬度依實際版面，字級不會跟著縮放
 const H = 72;
 const PAD = { left: 34, right: 4, top: 6, bottom: 14 };
@@ -37,15 +34,6 @@ function clock(t) {
 const value = (point, target, key) => point[target][key] ?? null;
 
 const METRICS = {
-  instances: {
-    max: (values, options) => countAxisMax(values, options.autoMax),
-    ticks: countTicks,
-    tickLabel: (v) => String(v),
-    format: (v) => instancesLabel({ instances: v }),
-    tooltip: (cell) => instancesLabel(cell),
-    path: stepPath,
-    cap: true,
-  },
   success_rate: {
     max: () => 1,
     ticks: () => [0, 0.5, 1],
@@ -63,9 +51,9 @@ const METRICS = {
 
 export function initDashboard({ toggle, panel }) {
   const status = panel.querySelector("#dash-status");
-  const options = { autoMax: DEFAULT_AUTO_MAX, myTag: null };
+  let myTag = null;
   const graph = createRequestGraph(panel.querySelector(".graph-svg"));
-  const charts = [...panel.querySelectorAll(".chart")].map((figure) => setupChart(figure, options));
+  const charts = [...panel.querySelectorAll(".chart")].map(setupChart);
   // 手機版預設收起趨勢圖與請求流向圖，讓儀表板與兩個追蹤區塊擠得進同一個畫面
   const wide = matchMedia("(min-width: 768px)").matches;
   panel.querySelector("#dash-charts").open = wide;
@@ -101,19 +89,15 @@ export function initDashboard({ toggle, panel }) {
       renderStats(panel.querySelector(`.dash-target[data-target="${target}"] .stats`), snap.targets[target]);
     }
     for (const chart of charts) chart.update(snap.series);
-    graph.update(snap, options.myTag);
+    graph.update(snap, myTag);
     const unserved = panel.querySelector(".graph-unserved");
     unserved.textContent = TARGETS.map((t) => unservedText(NAME[t], snap.targets[t].failures)).filter(Boolean).join("\n");
     unserved.hidden = !unserved.textContent;
   }
 
   return {
-    setAutoMax(n) {
-      options.autoMax = Number.isFinite(n) && n > 0 ? n : DEFAULT_AUTO_MAX;
-      for (const chart of charts) chart.redraw();
-    },
     setClientId(id) {
-      options.myTag = id ? id.slice(0, 8) : null;
+      myTag = id ? id.slice(0, 8) : null;
       if (latest) render(latest);
     },
   };
@@ -123,22 +107,27 @@ function renderStats(dl, t) {
   const [latency, small] = latencyText(t);
   const failed = Object.values(t.failures).some((n) => n > 0);
   const rows = [
-    { label: "個體數", value: String(t.instances) },
-    { label: "每秒請求", value: t.rps.toFixed(t.rps < 10 ? 1 : 0), hint: RPS_HINT },
-    { label: "成功率", value: formatPct(t.success_rate) },
-    { label: "平均回應時間", value: latency, cls: small ? "small" : "", hint: LATENCY_HINT },
-    { label: "失敗次數", value: failureText(t.failures), cls: failed ? "small fail" : "small", hint: FAILURE_HINT, wide: true },
+    // 名稱與 Cloud Run 原生指標一致，括號內是取用的面向（README 第 6 節）
+    { label: "容器執行個體數量", value: String(t.instances), hint: INSTANCES_HINT },
+    { label: "要求數（每秒）", value: t.rps.toFixed(t.rps < 10 ? 1 : 0), hint: RPS_HINT },
+    { label: "要求數（成功率）", value: formatPct(t.success_rate) },
+    { label: "要求的延遲時間（平均）", value: latency, cls: small ? "small" : "", hint: LATENCY_HINT },
+    { label: "要求數（失敗）", value: failureText(t.failures), cls: failed ? "small fail" : "small", hint: FAILURE_HINT, wide: true },
   ];
   dl.replaceChildren(...rows.map(({ label, value: text, cls, hint, wide }) => {
     const div = document.createElement("div");
     if (hint) div.title = hint; // 滑鼠停在欄位上時說明怎麼算
     if (wide) div.className = "wide";
-    div.append(html("dt", label), html("dd", text, cls || undefined));
+    // 括號內的面向不從中間斷行，窄欄時整段換到下一行
+    const [name, aspect] = label.split(/(?=（)/);
+    const dt = html("dt", name);
+    if (aspect) dt.append(html("span", aspect, "aspect"));
+    div.append(dt, html("dd", text, cls || undefined));
     return div;
   }));
 }
 
-function setupChart(figure, options) {
+function setupChart(figure) {
   const key = figure.dataset.metric;
   const metric = METRICS[key];
   const svg = figure.querySelector("svg");
@@ -154,7 +143,7 @@ function setupChart(figure, options) {
     W = svg.clientWidth || W;
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
     const values = series.flatMap((p) => TARGETS.map((t) => value(p, t, key))).filter((v) => v !== null);
-    const max = metric.max(values, options);
+    const max = metric.max(values);
     const n = Math.max(series.length - 1, 1);
     x = (i) => PAD.left + (i * (W - PAD.left - PAD.right)) / n;
     y = (v) => H - PAD.bottom - (v / max) * (H - PAD.top - PAD.bottom);
@@ -171,18 +160,9 @@ function setupChart(figure, options) {
       }, svg);
       label.textContent = text;
     });
-    if (metric.cap) {
-      const cap = options.autoMax;
-      el("line", { x1: PAD.left, x2: W - PAD.right, y1: y(cap), y2: y(cap), class: "cap-line auto-stroke" }, svg);
-      // 虛線貼近頂端時把字放到線下方，避免撞到圖例
-      const labelY = y(cap) - PAD.top < 10 ? y(cap) + 11 : y(cap) - 3;
-      const label = el("text", { x: W - PAD.right, y: labelY, "text-anchor": "end", class: "tick cap-label" }, svg);
-      label.textContent = `上限 ${cap} 台`;
-    }
-    const path = metric.path ?? chartPath;
     for (const target of TARGETS) {
       const values = series.map((p) => value(p, target, key));
-      const d = path(values, x, y);
+      const d = chartPath(values, x, y);
       if (d) el("path", { d, class: `line ${target}-stroke` }, svg);
       // 前後都沒有資料的點連不成線，改畫一個點
       values.forEach((v, i) => {
@@ -217,8 +197,7 @@ function setupChart(figure, options) {
       html("div", `${clock(p.t)}–${clock(p.t + 10)}`, "muted"),
       ...TARGETS.map((target) => {
         const row = html("div");
-        const text = metric.tooltip ? metric.tooltip(p[target]) : metric.format(value(p, target, key));
-        row.append(html("i", undefined, `swatch swatch-${target}`), html("strong", text), NAME[target]);
+        row.append(html("i", undefined, `swatch swatch-${target}`), html("strong", metric.format(value(p, target, key))), NAME[target]);
         return row;
       }),
     );
@@ -248,9 +227,6 @@ function setupChart(figure, options) {
     update(next) {
       series = next;
       draw();
-    },
-    redraw() {
-      if (series.length) draw();
     },
   };
 }

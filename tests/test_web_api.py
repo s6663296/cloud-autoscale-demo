@@ -122,25 +122,11 @@ def test_config_from_env(monkeypatch):
     monkeypatch.setattr(config, "AUTO_URL", "https://auto.example")
     monkeypatch.setattr(config, "TIMEOUT_MS", 50)
     monkeypatch.setattr(config, "TRACK_INTERVAL_MS", 1500)
-    monkeypatch.setattr(config, "AUTO_MAX_INSTANCES", 12)
     with TestClient(create_app()) as c:
         assert c.get("/api/config").json() == {
             "fixed_url": "https://fixed.example", "auto_url": "https://auto.example", "timeout_ms": 50,
-            "track_interval_ms": 1500, "auto_max_instances": 12,
+            "track_interval_ms": 1500,
         }
-
-
-def test_auto_max_instances_defaults_to_10(monkeypatch):
-    import importlib
-
-    monkeypatch.delenv("AUTO_MAX_INSTANCES", raising=False)
-    try:
-        assert importlib.reload(config).AUTO_MAX_INSTANCES == 10
-        monkeypatch.setenv("AUTO_MAX_INSTANCES", "8")
-        assert importlib.reload(config).AUTO_MAX_INSTANCES == 8
-    finally:
-        monkeypatch.delenv("AUTO_MAX_INSTANCES", raising=False)
-        importlib.reload(config)
 
 
 def test_map(client):
@@ -154,7 +140,10 @@ def test_index_and_static(client):
     assert res.status_code == 200
     assert "text/html" in res.headers["content-type"]
     assert client.get("/static/index.html").status_code == 200
-    assert 'data-metric="instances"' in res.text
+    assert 'data-metric="success_rate"' in res.text
+    assert 'data-metric="instances"' not in res.text  # 與「容器執行個體數量」卡片重複，已移除
+    assert ">要求數（成功率）</figcaption>" in res.text  # 名稱與 Cloud Run 原生指標一致
+    assert ">要求的延遲時間（平均）</figcaption>" in res.text
     assert 'id="nickname-dialog"' in res.text
     assert 'id="nickname-chip"' in res.text
     # 在輸入框按 Enter 會按下表單裡第一個送出按鈕，必須是「開始點餐」，不然打好的暱稱會被當成略過
