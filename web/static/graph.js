@@ -28,7 +28,6 @@ function label(parent, x, y, text, cls, anchor = "middle") {
 }
 
 export function createRequestGraph(svg) {
-  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const lines = el("g", { class: "graph-lines" }, svg);
   const nodes = el("g", { class: "graph-nodes" }, svg);
   const flying = el("g", { class: "graph-dots" }, svg);
@@ -109,9 +108,7 @@ export function createRequestGraph(svg) {
     const now = performance.now();
     const add = (from, to, cls, fail = false) => {
       if (dots.length >= MAX_DOTS) return;
-      // 減少動態時小點不移動，停在線上隨機一處淡出
-      const at = reduceMotion ? 0.3 + Math.random() * 0.5 : null;
-      dots.push({ from, to, cls, fail, at, start: now + Math.random() * 1000 });
+      dots.push({ from, to, cls, fail, start: now + Math.random() * 1000 });
     };
     for (const target of TARGETS) {
       const t = snap.targets[target];
@@ -136,17 +133,15 @@ export function createRequestGraph(svg) {
     for (const d of dots) {
       const p = (now - d.start) / FLIGHT_MS;
       if (p < 0) continue;
-      const pos = d.at ?? p;
-      const x = d.from.x + (d.to.x - d.from.x) * pos;
-      const y = d.from.y + (d.to.y - d.from.y) * pos;
-      const failing = d.fail && (d.at !== null || p > 0.6);
+      const x = d.from.x + (d.to.x - d.from.x) * p;
+      const y = d.from.y + (d.to.y - d.from.y) * p;
+      const failing = d.fail && p > 0.6;
       const c = document.createElementNS(NS, "circle");
       c.setAttribute("cx", x);
       c.setAttribute("cy", y);
       c.setAttribute("r", 3);
       c.setAttribute("class", failing ? "flow-dot fail" : d.cls);
-      if (d.at !== null) c.setAttribute("opacity", String(1 - p));
-      else if (failing) c.setAttribute("opacity", String(Math.max(0, 1 - (p - 0.6) / 0.4)));
+      if (failing) c.setAttribute("opacity", String(Math.max(0, 1 - (p - 0.6) / 0.4)));
       circles.push(c);
     }
     flying.replaceChildren(...circles);
