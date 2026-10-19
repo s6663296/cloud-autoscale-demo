@@ -15,7 +15,8 @@ from loadtest.stats import Aggregator, Window, report_payload, summary_line, tot
 MAX_INFLIGHT = 2000
 REQUEST_TIMEOUT_S = 10.0
 TIMEOUT_LATENCY_MS = 10000
-REPORT_TIMEOUT_S = 3.0
+# web 依收到的時間分格，晚到的回報只是落在較晚的那一秒，不必急著放棄
+REPORT_TIMEOUT_S = 10.0
 TRACK_INTERVAL_S = 2.0
 MAX_TRACK_FAILURES = 5  # 連續失敗這麼多次就放棄追蹤，像真實顧客關掉 App
 # 下單失敗時像真實顧客一樣隔一下再按一次，最多試這麼多次。失敗的顧客若直接消失，
