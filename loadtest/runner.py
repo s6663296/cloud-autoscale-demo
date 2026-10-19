@@ -78,7 +78,9 @@ async def send_request(
         res = task.result()
     except httpx.TimeoutException:
         return Result("timeout", TIMEOUT_LATENCY_MS)
-    except (httpx.HTTPError, OSError):  # OSError 包含 httpx 未包裝的 ssl.SSLError
+    # 其餘一律算 error：httpx 沒包裝的例外也會漏出來，例如 ssl.SSLError（OSError），以及伺服器先關掉
+    # HTTP/2 stream 時 h2 拋出的 KeyError。漏出去會讓這位模擬顧客整個消失，固定顧客數模式就少一個人
+    except Exception:
         return Result("error", (time.perf_counter() - start) * 1000)
     latency = (time.perf_counter() - start) * 1000
     if res.status_code == 200:

@@ -26,8 +26,9 @@ PROBE_SEED = 20261008
 LOCAL_WEB = "http://localhost:8000"
 SAVED_FILE = Path(__file__).resolve().parent.parent / ".loadtest.json"
 # 互動模式的（同時在線顧客數, 加壓秒數, 持續秒數）。每位顧客每 2 秒追蹤一次，
-# 每個目標約每秒 顧客數 ÷ 2 個請求。本機固定版只有 1 個程序、擴展版 8 個 worker：400 位會讓固定版過載、擴展版撐得住
-DEFAULTS = {"local": (400, 20, 120), "cloud": (500, 10, 600)}
+# 每個目標約每秒 顧客數 ÷ 2 個請求。本機固定版只有 1 個程序、擴展版 8 個 worker：400 位會讓固定版過載、擴展版撐得住。
+# 雲端加壓 25 秒：顧客上線時集中下單，加壓太短時擴展版的新機器來不及開機，開頭會有逾時
+DEFAULTS = {"local": (400, 20, 120), "cloud": (500, 25, 600)}
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:

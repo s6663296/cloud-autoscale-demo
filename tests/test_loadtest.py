@@ -249,6 +249,18 @@ def test_send_request_ssl_error_counts_as_error():
     assert asyncio.run(go()).outcome == "error"
 
 
+def test_send_request_h2_key_error_counts_as_error():
+    # 伺服器先關掉 HTTP/2 stream 時，h2 送出結尾會拋 KeyError（未被 httpx 包裝），不可讓模擬顧客跟著消失
+    def handler(request):
+        raise KeyError(3751)
+
+    async def go():
+        async with _client(handler) as c:
+            return await send_request(c, "http://t", "/api/orders", {}, timeout_s=1)
+
+    assert asyncio.run(go()).outcome == "error"
+
+
 # --- 整合：模擬顧客（MockTransport）----------------------------------------
 
 
