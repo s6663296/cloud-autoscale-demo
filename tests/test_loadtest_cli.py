@@ -38,6 +38,11 @@ class Prompts:
     def plan(self):
         return prompt_plan(ask=self.ask, out=self.out, load_saved=self.load, save=self.save, fetch_config=self.fetch)
 
+    def plan_by_rate(self):
+        return prompt_plan(
+            ask=self.ask, out=self.out, load_saved=self.load, save=self.save, fetch_config=self.fetch, by_rate=True,
+        )
+
 
 def test_local_defaults():
     p = Prompts(["", "", "", "", "", ""])
@@ -62,6 +67,14 @@ def test_cloud_uses_saved_url_and_cloud_defaults():
     plan = p.plan()
     assert plan.report_to == "https://saved.run.app"
     assert (plan.customers, plan.ramp, plan.duration) == (500, 25, 600)
+
+
+def test_by_rate_uses_old_rate_defaults():
+    # run_loadtest_rate.bat：舊版的固定到達速率
+    local = Prompts(["", "", "", "", "", ""]).plan_by_rate()
+    assert (local.customers, local.rate, local.ramp, local.duration) == (None, 8, 20, 120)
+    cloud = Prompts(["2", "", "", "", "", "", ""], saved="https://saved.run.app").plan_by_rate()
+    assert (cloud.customers, cloud.rate, cloud.ramp, cloud.duration) == (None, 15, 10, 600)
 
 
 def test_cloud_not_deployed_yet():

@@ -349,7 +349,7 @@ flowchart LR
 
 ## 7. 壓力測試工具
 
-Windows 可直接雙擊 `run_loadtest.bat`，或不帶參數執行 `python -m loadtest` 進入互動模式：依序選擇目標環境（本機或雲端）、模式（壓測或量測容量）與速率，確認後開始。本機的 web 固定為 `http://localhost:8000`；雲端第一次使用時貼上 web 網址，會記在專案根目錄的 `.loadtest.json`（不進 git），之後直接沿用。
+Windows 可直接雙擊 `run_loadtest.bat`，或不帶參數執行 `python -m loadtest` 進入互動模式：依序選擇目標環境（本機或雲端）、模式（壓測或量測容量）與速率，確認後開始。本機的 web 固定為 `http://localhost:8000`；雲端第一次使用時貼上 web 網址，會記在專案根目錄的 `.loadtest.json`（不進 git），之後直接沿用。想用舊版的固定到達速率壓測，改雙擊 `run_loadtest_rate.bat`（即 `python -m loadtest --by-rate`），預設為本機每秒 8 位新顧客、加壓 20 秒、持續 120 秒，雲端每秒 15 位、加壓 10 秒、持續 600 秒。
 
 非互動模式（固定版與擴展版的網址預設取自 web 的 `/api/config`，也可用 `--fixed`、`--auto`、`--target` 指定）：
 
@@ -428,6 +428,7 @@ deploy.sh    部署腳本
 Dockerfile   共用映像檔
 run_local.bat     Windows 本機一鍵啟動三個服務（自動建立虛擬環境）
 run_loadtest.bat  Windows 互動式壓力測試
+run_loadtest_rate.bat  同上，壓測改用固定到達速率（舊版）
 ```
 
 ## 10. 本機測試

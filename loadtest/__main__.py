@@ -1,6 +1,7 @@
 """壓力測試 CLI（README 第 7 節）。
 
 python -m loadtest                     互動模式：選擇本機或雲端、壓測或量測容量
+python -m loadtest --by-rate           互動模式，壓測改用固定到達速率（舊版，run_loadtest_rate.bat）
 python -m loadtest run --report-to <WEB_URL> --customers 200 --ramp 30 --duration 300
 python -m loadtest run --report-to <WEB_URL> --rate 60 --ramp 60 --duration 300
 python -m loadtest probe --report-to <WEB_URL>
@@ -29,6 +30,9 @@ SAVED_FILE = Path(__file__).resolve().parent.parent / ".loadtest.json"
 # 每個目標約每秒 顧客數 ÷ 2 個請求。本機固定版只有 1 個程序、擴展版 8 個 worker：400 位會讓固定版過載、擴展版撐得住。
 # 雲端加壓 25 秒：顧客上線時集中下單，加壓太短時擴展版的新機器來不及開機，開頭會有逾時
 DEFAULTS = {"local": (400, 20, 120), "cloud": (500, 25, 600)}
+# --by-rate（run_loadtest_rate.bat）的（每秒新顧客數, 加壓秒數, 持續秒數），即改用固定顧客數之前的預設
+RATE_DEFAULTS = {"local": (8, 20, 120), "cloud": (15, 10, 600)}
+BY_RATE_FLAG = "--by-rate"
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -87,10 +91,11 @@ def prompt_plan(
     load_saved: Callable[[], str | None],
     save: Callable[[str], None],
     fetch_config: Callable[[str], dict],
+    by_rate: bool = False,
 ) -> argparse.Namespace | None:
-    """逐步詢問壓測設定；取消、輸入結束或無法連線時回傳 None。"""
+    """逐步詢問壓測設定；取消、輸入結束或無法連線時回傳 None。by_rate 時壓測改用固定到達速率。"""
     try:
-        return _prompt(ask, out, load_saved, save, fetch_config)
+        return _prompt(ask, out, load_saved, save, fetch_config, by_rate)
     except (EOFError, KeyboardInterrupt):
         out("\n已取消")
         return None
@@ -117,7 +122,7 @@ def _number(ask, out, question: str, default: float, allow_zero: bool = False) -
         out("請輸入 0 以上的數字" if allow_zero else "請輸入大於 0 的數字")
 
 
-def _prompt(ask, out, load_saved, save, fetch_config) -> argparse.Namespace | None:
+def _prompt(ask, out, load_saved, save, fetch_config, by_rate) -> argparse.Namespace | None:
     out("外送系統 壓力測試")
     out("目標環境：")
     out(f"  1) 本機（run_local.bat 啟動的服務，web {LOCAL_WEB}）")
@@ -156,6 +161,16 @@ def _prompt(ask, out, load_saved, save, fetch_config) -> argparse.Namespace | No
             step=15, threshold=0.05, max_rate=50, config=config,
         )
         summary = "量測固定版容量：從每秒 1 位新顧客開始，每 15 秒加 1"
+    elif by_rate:
+        rate_d, ramp_d, duration_d = RATE_DEFAULTS[env]
+        rate = _number(ask, out, "每秒新顧客數", rate_d)
+        ramp = _number(ask, out, "加壓秒數（由 0 線性增加）", ramp_d, allow_zero=True)
+        duration = _number(ask, out, "產生新顧客的總秒數", duration_d)
+        plan = argparse.Namespace(
+            command="run", report_to=web, fixed=config.get("fixed_url"), auto=config.get("auto_url"),
+            customers=None, rate=rate, ramp=ramp, duration=duration, procs=DEFAULT_PROCS, config=config,
+        )
+        summary = f"每秒 {rate:g} 位新顧客、加壓 {ramp:g} 秒、持續 {duration:g} 秒（之後等配送完成）"
     else:
         customers_d, ramp_d, duration_d = DEFAULTS[env]
         customers = max(1, round(_number(ask, out, "同時在線顧客數（有人送達就補上）", customers_d)))
@@ -222,10 +237,10 @@ def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
     argv = sys.argv[1:] if argv is None else argv
-    if not argv:
+    if not argv or argv == [BY_RATE_FLAG]:
         args = prompt_plan(
             ask=input, out=print, load_saved=_load_saved, save=_save,
-            fetch_config=lambda web: fetch_json(web, "/api/config"),
+            fetch_config=lambda web: fetch_json(web, "/api/config"), by_rate=bool(argv),
         )
         if args is None:
             return 1
