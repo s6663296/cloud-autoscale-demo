@@ -103,9 +103,12 @@ def format_ms(ms: float | None) -> str:
 
 
 def summary_line(
-    elapsed: float, rate: float, windows: dict[str, Window], inflight: dict[str, int], delivering: dict[str, int]
+    elapsed: float, rate: float, windows: dict[str, Window], inflight: dict[str, int], delivering: dict[str, int],
+    customers: bool = False,
 ) -> str:
-    parts = [f"[{elapsed:5.0f}s] 新顧客 {rate:6.1f}/s"]
+    """customers 為 True 時 rate 是目標同時在線顧客數，否則是每秒新顧客數。"""
+    head = f"同時顧客 {rate:5.0f} 位" if customers else f"新顧客 {rate:6.1f}/s"
+    parts = [f"[{elapsed:5.0f}s] {head}"]
     for name, w in windows.items():
         parts.append(
             f"{name} 下單 {w.orders} 請求 {w.sent} 成功 {w.counts['ok']} 失敗 {w.failed} 丟棄 {w.dropped} "

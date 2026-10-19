@@ -45,7 +45,7 @@ def test_local_defaults():
     assert plan.command == "run"
     assert plan.report_to == "http://localhost:8000"
     assert (plan.fixed, plan.auto) == ("http://f", "http://a")
-    assert (plan.rate, plan.ramp, plan.duration) == (8, 20, 120)
+    assert (plan.customers, plan.ramp, plan.duration) == (400, 20, 120)
     assert p.fetched == ["http://localhost:8000"]
 
 
@@ -54,14 +54,14 @@ def test_cloud_first_time_saves_url():
     plan = p.plan()
     assert plan.report_to == "https://web-xyz.a.run.app"
     assert p.saved == "https://web-xyz.a.run.app"
-    assert (plan.rate, plan.ramp, plan.duration) == (30, 10, 60)
+    assert (plan.customers, plan.ramp, plan.duration) == (30, 10, 60)
 
 
 def test_cloud_uses_saved_url_and_cloud_defaults():
     p = Prompts(["2", "", "", "", "", "", ""], saved="https://saved.run.app")
     plan = p.plan()
     assert plan.report_to == "https://saved.run.app"
-    assert (plan.rate, plan.ramp, plan.duration) == (15, 10, 600)
+    assert (plan.customers, plan.ramp, plan.duration) == (500, 10, 600)
 
 
 def test_cloud_not_deployed_yet():
@@ -74,7 +74,7 @@ def test_cloud_not_deployed_yet():
 def test_invalid_number_asks_again():
     p = Prompts(["1", "1", "abc", "-5", "12", "", "", "y"])
     plan = p.plan()
-    assert plan.rate == 12
+    assert plan.customers == 12
     assert sum("請輸入大於 0 的數字" in line for line in p.lines) == 2
 
 
@@ -124,6 +124,13 @@ def test_probe_target_from_config(name, expected):
     args = parse_args(["probe", "--report-to", "http://w", "--as", name])
     resolve_targets(args, CONFIG)
     assert args.target == expected
+
+
+def test_run_customers_flag():
+    assert parse_args(["run", "--report-to", "http://w", "--duration", "10", "--customers", "200"]).customers == 200
+    assert parse_args(["run", "--report-to", "http://w", "--duration", "10"]).customers is None
+    with pytest.raises(SystemExit):
+        parse_args(["run", "--report-to", "http://w", "--duration", "10", "--customers", "0"])
 
 
 def test_missing_urls_everywhere_is_an_error():

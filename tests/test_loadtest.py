@@ -9,7 +9,7 @@ import pytest
 
 from loadtest.orders import OrderFactory
 from loadtest.parallel import Merger
-from loadtest.runner import MAX_ORDER_ATTEMPTS, MAX_TRACK_FAILURES, run_load, run_probe, send_request
+from loadtest.runner import MAX_ORDER_ATTEMPTS, MAX_TRACK_FAILURES, OrderFeed, run_load, run_probe, send_request
 from loadtest.schedule import rate_at, run_schedule, send_times
 from loadtest.stats import Aggregator, Window, merge_windows, report_payload
 from shared.citymap import build_city
@@ -309,7 +309,8 @@ class FakeDispatch:
             self.inflight[key] -= 1
 
 
-def _run_load(web, dispatch, *, duration, rate=20, stop_after=None, max_inflight=2000, track_interval=0.05):
+def _run_load(web, dispatch, *, duration, rate=20, stop_after=None, max_inflight=2000, track_interval=0.05,
+              customers=None, ramp=0):
     lines = []
 
     async def go():
@@ -318,10 +319,10 @@ def _run_load(web, dispatch, *, duration, rate=20, stop_after=None, max_inflight
             asyncio.get_running_loop().call_later(stop_after, stop.set)
         await run_load(
             {"fixed": "http://fixed", "auto": "http://auto"}, "http://web",
-            rate=rate, ramp=0, duration=duration, orders=OrderFactory(MAP, random.Random(0)), stop=stop,
+            rate=rate, ramp=ramp, duration=duration, orders=OrderFactory(MAP, random.Random(0)), stop=stop,
             out=lines.append, target_transport=httpx.MockTransport(dispatch.handler),
             web_transport=httpx.MockTransport(web.handler), max_inflight=max_inflight,
-            track_interval_s=track_interval,
+            track_interval_s=track_interval, customers=customers,
         )
 
     asyncio.run(go())
@@ -413,6 +414,67 @@ def test_dropped_when_inflight_limit_reached():
     web, fake = Web(), FakeDispatch(order_delay=5)
     lines = _run_load(web, fake, duration=1.2, rate=20, stop_after=1.3, max_inflight=3)
     assert _sum(lines, "丟棄") >= 15
+
+
+class CountingDispatch(FakeDispatch):
+    """記錄每個目標同時在線（已下單、尚未送達）的顧客數最大值。"""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.active = {}
+        self.max_active = {}
+
+    async def handler(self, request):
+        res = await super().handler(request)
+        host = request.url.host
+        if request.url.path == "/api/orders" and res.status_code == 200:
+            self.active[host] = self.active.get(host, 0) + 1
+            self.max_active[host] = max(self.max_active.get(host, 0), self.active[host])
+        elif res.status_code == 200 and json.loads(res.content)["phase"] == "delivered":
+            self.active[host] -= 1
+        return res
+
+
+def test_customers_mode_keeps_fixed_count():
+    """固定 5 位顧客：有人送達就補上，同時在線的人數不會超過 5，總訂單數隨送達持續增加。"""
+    web, fake = Web(), CountingDispatch(track_steps=2)
+    lines = _run_load(web, fake, duration=1.0, customers=5)
+    assert fake.max_active == {"fixed": 5, "auto": 5}
+    assert fake.orders // 2 > 5 * 3  # 每位約 0.1 秒送達，1 秒內補上很多次
+    assert all(n == 0 for n in fake.active.values())
+    assert any("同時顧客" in line for line in lines)
+
+
+def test_customers_mode_same_orders_on_both_targets():
+    seen = {"fixed": [], "auto": []}
+    fake = FakeDispatch(track_steps=1)
+    original = fake.handler
+
+    async def handler(request):
+        if request.url.path == "/api/orders":
+            seen[request.url.host].append(json.loads(request.content)["order_id"])
+        return await original(request)
+
+    fake.handler = handler
+    _run_load(Web(), fake, duration=0.5, customers=3)
+    n = min(len(seen["fixed"]), len(seen["auto"]))
+    assert n > 3
+    assert sorted(seen["fixed"][:n]) == sorted(seen["auto"][:n])
+
+
+def test_customers_mode_ramps_up():
+    web, fake = Web(), CountingDispatch(track_steps=10_000)
+    _run_load(web, fake, duration=0.5, customers=10, ramp=1.0, stop_after=0.6)
+    assert 3 <= fake.max_active["fixed"] <= 7  # 0.5 秒時約一半上線
+
+
+def test_order_feed_shares_orders_and_trims():
+    feed = OrderFeed(OrderFactory(MAP, random.Random(0)), ["fixed", "auto"])
+    a = [feed.next("fixed") for _ in range(5)]
+    assert len(feed.buffer) == 5
+    b = [feed.next("auto") for _ in range(3)]
+    assert b == a[:3]
+    assert (feed.base, len(feed.buffer)) == (3, 2)
 
 
 def test_probe_finds_capacity():

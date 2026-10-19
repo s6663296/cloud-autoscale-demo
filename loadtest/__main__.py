@@ -1,6 +1,7 @@
 """壓力測試 CLI（README 第 7 節）。
 
 python -m loadtest                     互動模式：選擇本機或雲端、壓測或量測容量
+python -m loadtest run --report-to <WEB_URL> --customers 200 --ramp 30 --duration 300
 python -m loadtest run --report-to <WEB_URL> --rate 60 --ramp 60 --duration 300
 python -m loadtest probe --report-to <WEB_URL>
 
@@ -24,20 +25,25 @@ from loadtest.runner import run_load, run_probe
 PROBE_SEED = 20261008
 LOCAL_WEB = "http://localhost:8000"
 SAVED_FILE = Path(__file__).resolve().parent.parent / ".loadtest.json"
-# 本機固定版只有 1 個程序、擴展版 8 個 worker：每秒 8 位新顧客會讓固定版過載、擴展版撐得住
-DEFAULTS = {"local": (8, 20, 120), "cloud": (15, 10, 600)}
+# 互動模式的（同時在線顧客數, 加壓秒數, 持續秒數）。每位顧客每 2 秒追蹤一次，
+# 每個目標約每秒 顧客數 ÷ 2 個請求。本機固定版只有 1 個程序、擴展版 8 個 worker：400 位會讓固定版過載、擴展版撐得住
+DEFAULTS = {"local": (400, 20, 120), "cloud": (500, 10, 600)}
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="python -m loadtest", description="外送系統 壓力測試（不帶參數為互動模式）")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    run = sub.add_parser("run", help="以固定到達速率同時對兩個 dispatch 施壓")
+    run = sub.add_parser("run", help="以固定同時在線顧客數或固定到達速率，同時對兩個 dispatch 施壓")
     run.add_argument("--report-to", required=True, help="web 網址（每秒回報、取得地圖與設定）")
     run.add_argument("--fixed", help="dispatch-fixed 網址（預設取自 web 設定）")
     run.add_argument("--auto", help="dispatch-auto 網址（預設取自 web 設定）")
-    run.add_argument("--rate", type=float, default=60, help="每秒新顧客數（預設 60）")
-    run.add_argument("--ramp", type=float, default=60, help="由 0 線性加壓到 --rate 的秒數（預設 60）")
+    run.add_argument(
+        "--customers", type=int,
+        help="每個目標維持的同時在線顧客數，有人送達或放棄就補上；指定時不使用 --rate",
+    )
+    run.add_argument("--rate", type=float, default=60, help="每秒新顧客數，沒有上限地累積（預設 60）")
+    run.add_argument("--ramp", type=float, default=60, help="由 0 線性加壓到 --customers 或 --rate 的秒數（預設 60）")
     run.add_argument("--duration", type=float, required=True, help="產生新顧客的總秒數（含加壓）")
     run.add_argument(
         "--procs", type=int, default=DEFAULT_PROCS,
@@ -51,7 +57,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     probe.add_argument("--step", type=float, default=15, help="每階段秒數（預設 15）")
     probe.add_argument("--threshold", type=float, default=0.05, help="失敗率門檻（預設 0.05）")
     probe.add_argument("--max-rate", type=int, default=50, help="速率上限（預設 50）")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.command == "run" and args.customers is not None and args.customers <= 0:
+        parser.error("--customers 必須大於 0")
+    return args
 
 
 def resolve_targets(args: argparse.Namespace, config: dict) -> None:
@@ -147,15 +156,15 @@ def _prompt(ask, out, load_saved, save, fetch_config) -> argparse.Namespace | No
         )
         summary = "量測固定版容量：從每秒 1 位新顧客開始，每 15 秒加 1"
     else:
-        rate_d, ramp_d, duration_d = DEFAULTS[env]
-        rate = _number(ask, out, "每秒新顧客數", rate_d)
-        ramp = _number(ask, out, "加壓秒數（由 0 線性增加）", ramp_d, allow_zero=True)
+        customers_d, ramp_d, duration_d = DEFAULTS[env]
+        customers = max(1, round(_number(ask, out, "同時在線顧客數（有人送達就補上）", customers_d)))
+        ramp = _number(ask, out, "加壓秒數（由 0 逐步上線）", ramp_d, allow_zero=True)
         duration = _number(ask, out, "產生新顧客的總秒數", duration_d)
         plan = argparse.Namespace(
             command="run", report_to=web, fixed=config.get("fixed_url"), auto=config.get("auto_url"),
-            rate=rate, ramp=ramp, duration=duration, procs=DEFAULT_PROCS, config=config,
+            customers=customers, rate=0, ramp=ramp, duration=duration, procs=DEFAULT_PROCS, config=config,
         )
-        summary = f"每秒 {rate:g} 位新顧客、加壓 {ramp:g} 秒、持續 {duration:g} 秒（之後等配送完成）"
+        summary = f"每邊維持 {customers} 位顧客、加壓 {ramp:g} 秒、持續 {duration:g} 秒（之後等配送完成）"
 
     out(summary)
     if ask("確認開始？[Y/n]: ").strip().lower() not in ("", "y", "yes"):
@@ -192,7 +201,7 @@ async def _main(args: argparse.Namespace, map_json: dict, track_interval_s: floa
             await run_load(
                 run_targets(args), args.report_to, rate=args.rate, ramp=args.ramp, duration=args.duration,
                 orders=OrderFactory(map_json, random.Random()), stop=stop, track_interval_s=track_interval_s,
-                out=lambda line: print(line, flush=True),
+                out=lambda line: print(line, flush=True), customers=args.customers,
             )
             return 0
         capacity = await run_probe(
@@ -238,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_parallel(
             run_targets(args), args.report_to, rate=args.rate, ramp=args.ramp, duration=args.duration,
             map_json=map_json, track_interval_s=track_interval_s, procs=args.procs,
-            out=lambda line: print(line, flush=True),
+            out=lambda line: print(line, flush=True), customers=args.customers,
         )
     try:
         return asyncio.run(_main(args, map_json, track_interval_s))

@@ -51,9 +51,10 @@ def stop_on_signal(stop: asyncio.Event, announce: Callable[[], None] | None = No
 class Merger:
     """依子程序的回報序號（第幾秒）合併統計，全部到齊或逾期時印出一行。"""
 
-    def __init__(self, procs: int, out: Callable[[str], None]):
+    def __init__(self, procs: int, out: Callable[[str], None], customers: bool = False):
         self.procs = procs
         self.out = out
+        self.customers = customers  # 速率欄是同時在線顧客數
         self.pending: dict[int, list[tuple]] = {}
 
     def add(self, tick: int, elapsed: float, rate: float, windows: dict, inflight: dict, delivering: dict) -> None:
@@ -79,12 +80,12 @@ class Merger:
                 delivering[name] = delivering.get(name, 0) + n
         self.out(summary_line(
             max(p[0] for p in parts), sum(p[1] for p in parts),
-            merge_windows([p[2] for p in parts]), inflight, delivering,
+            merge_windows([p[2] for p in parts]), inflight, delivering, self.customers,
         ))
 
 
 def _child(idx: int, procs: int, targets: dict, web_url: str, rate: float, ramp: float, duration: float,
-           max_inflight: int, map_json: dict, track_interval_s: float, q) -> None:
+           max_inflight: int, map_json: dict, track_interval_s: float, q, customers: int | None = None) -> None:
     async def main():
         stop = asyncio.Event()
         tick = 0
@@ -100,7 +101,7 @@ def _child(idx: int, procs: int, targets: dict, web_url: str, rate: float, ramp:
                 orders=OrderFactory(map_json, random.Random()), stop=stop, track_interval_s=track_interval_s,
                 max_inflight=max_inflight, max_connections=max(1, LOCAL_MAX_CONNECTIONS // procs),
                 out=lambda line: q.put(("log", idx, line)),
-                on_window=on_window, print_totals=False,
+                on_window=on_window, print_totals=False, customers=customers,
             )
         q.put(("done", idx, totals, abandoned, gave_up))
 
@@ -112,14 +113,18 @@ def _child(idx: int, procs: int, targets: dict, web_url: str, rate: float, ramp:
 
 def run_parallel(targets: dict[str, str], web_url: str, *, rate: float, ramp: float, duration: float,
                  map_json: dict, track_interval_s: float, procs: int,
-                 out: Callable[[str], None] = print) -> int:
+                 out: Callable[[str], None] = print, customers: int | None = None) -> int:
+    """customers 有值時改為維持固定的同時在線顧客數，平均分給各子程序。"""
+    if customers is not None:
+        procs = max(1, min(procs, customers))
+    shares = [None if customers is None else customers // procs + (i < customers % procs) for i in range(procs)]
     ctx = mp.get_context("spawn")
     q = ctx.Queue()
     children = [
         ctx.Process(
             target=_child, daemon=True,
             args=(i, procs, targets, web_url, rate / procs, ramp, duration, max(1, MAX_INFLIGHT // procs),
-                  map_json, track_interval_s, q),
+                  map_json, track_interval_s, q, shares[i]),
         )
         for i in range(procs)
     ]
@@ -139,7 +144,7 @@ def run_parallel(targets: dict[str, str], web_url: str, *, rate: float, ramp: fl
     try:
         for c in children:
             c.start()
-        merger = Merger(procs, out)
+        merger = Merger(procs, out, customers is not None)
         totals: list[dict[str, Window]] = []
         abandoned: dict[str, int] = {}
         gave_up: dict[str, int] = {}

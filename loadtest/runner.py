@@ -89,6 +89,28 @@ async def send_request(
     return Result("busy" if res.status_code == 429 else "error", latency)
 
 
+class OrderFeed:
+    """各目標依序取用同一串訂單：每個目標的第 k 次取用拿到同一筆，兩邊都取過的就丟掉。"""
+
+    def __init__(self, orders: OrderFactory, targets: list[str]):
+        self.orders = orders
+        self.pos = dict.fromkeys(targets, 0)
+        self.base = 0  # buffer[0] 是第幾筆
+        self.buffer: list[dict] = []
+
+    def next(self, name: str) -> dict:
+        k = self.pos[name]
+        self.pos[name] = k + 1
+        while k - self.base >= len(self.buffer):
+            self.buffer.append(self.orders.next())
+        body = self.buffer[k - self.base]
+        low = min(self.pos.values())
+        if low > self.base:
+            del self.buffer[: low - self.base]
+            self.base = low
+        return body
+
+
 class Session:
     """管理各目標的連線、進行中請求、模擬顧客、每秒彙總與回報。"""
 
@@ -121,6 +143,7 @@ class Session:
         self.on_complete = on_complete
         self.on_window = on_window  # 有設定時每秒統計交給它，不印 summary_line
         self.rate_fn: Callable[[float], float] = lambda elapsed: 0.0
+        self.customers_mode = False  # rate_fn 回傳的是目標同時在線顧客數
         self.agg = Aggregator(list(self.targets))
         self.inflight = dict.fromkeys(self.targets, 0)
         self.delivering = dict.fromkeys(self.targets, 0)
@@ -166,9 +189,30 @@ class Session:
     def new_customer(self, body: dict) -> None:
         """一位新顧客：同時向每個目標下單，並各自追蹤到送達。"""
         for name in self.targets:
-            task = asyncio.create_task(self._customer(name, body))
-            self._customers.add(task)
-            task.add_done_callback(self._customers.discard)
+            self._spawn(self._customer(name, body))
+
+    def _spawn(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._customers.add(task)
+        task.add_done_callback(self._customers.discard)
+
+    async def keep_customers(self, count: int, ramp: float, duration: float, orders: OrderFactory) -> None:
+        """每個目標維持 count 位同時在線的顧客：有人送達或放棄就立刻補上新顧客，直到 duration 結束。
+
+        ramp 秒內顧客依序上線。各目標的第 k 位顧客下同一筆訂單，兩邊的訂單內容相同。
+        """
+        feed = OrderFeed(orders, list(self.targets))
+        end = self.loop.time() + duration
+
+        async def slot(name: str, delay: float) -> None:
+            await self.sleep(delay)
+            while not self.stop.is_set() and self.loop.time() < end:
+                await self._customer(name, feed.next(name))
+
+        for i in range(count):
+            for name in self.targets:
+                self._spawn(slot(name, ramp * i / count))
+        await self.sleep(max(0.0, end - self.loop.time()))
 
     async def _customer(self, name: str, body: dict) -> None:
         order = await self._order(name, body)
@@ -261,7 +305,9 @@ class Session:
         if self.on_window:
             self.on_window(elapsed, self.rate_fn(elapsed), windows, dict(self.inflight), dict(self.delivering))
         else:
-            self.out(summary_line(elapsed, self.rate_fn(elapsed), windows, self.inflight, self.delivering))
+            self.out(summary_line(
+                elapsed, self.rate_fn(elapsed), windows, self.inflight, self.delivering, self.customers_mode,
+            ))
         task = asyncio.ensure_future(self._post(report_payload(windows)))
         self._reports.add(task)
         task.add_done_callback(self._reports.discard)
@@ -295,9 +341,11 @@ async def run_load(
     web_transport: httpx.AsyncBaseTransport | None = None,
     on_window: Callable[[float, float, dict, dict, dict], None] | None = None,
     print_totals: bool = True,
+    customers: int | None = None,
 ) -> tuple[dict[str, Window], dict[str, int], dict[str, int]]:
     """新顧客依到達速率出現，兩個目標相同速率、相同訂單內容；每位顧客追蹤到送達。
 
+    指定 customers 時不看 rate，改為每個目標維持 customers 位同時在線的顧客（ramp 秒內逐步上線）。
     回傳各目標的累計統計、放棄追蹤數與放棄下單數。
     """
     session = Session(
@@ -307,8 +355,15 @@ async def run_load(
         on_window=on_window,
     )
     async with session as s:
-        s.rate_fn = lambda elapsed: rate_at(elapsed, rate, ramp) if elapsed < duration else 0.0
-        await run_schedule(rate, ramp, duration, lambda: s.new_customer(orders.next()), s.loop.time, s.sleep, s.stop)
+        if customers is not None:
+            s.customers_mode = True
+            s.rate_fn = lambda elapsed: rate_at(elapsed, customers, ramp) if elapsed < duration else 0.0
+            await s.keep_customers(customers, ramp, duration, orders)
+        else:
+            s.rate_fn = lambda elapsed: rate_at(elapsed, rate, ramp) if elapsed < duration else 0.0
+            await run_schedule(
+                rate, ramp, duration, lambda: s.new_customer(orders.next()), s.loop.time, s.sleep, s.stop,
+            )
         if not stop.is_set():
             out("排程結束，不再產生新顧客，等待進行中的配送完成…")
             await s.drain()
